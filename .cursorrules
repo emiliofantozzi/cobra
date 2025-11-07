@@ -1,0 +1,414 @@
+# Reglas de trabajo para Cursor – Proyecto COBRA (Plataforma de cobranzas asistida por IA)
+
+## 0. Contexto del proyecto
+
+- Este repositorio implementa una **plataforma SaaS de cobranzas asistida por IA**.
+- Visión: ver `docs/overview.md`. Resumen:
+  - Empresas usuarias cargan **empresas clientes**, **contactos** y **facturas / cuotas**.
+  - La plataforma mantiene un **estado de cobranzas** por cliente/factura.
+  - Un **agente de IA** automatiza comunicaciones de cobranza (email, WhatsApp), interpreta respuestas y actualiza el estado.
+- Este repositorio contiene:
+  - La **app Next.js** (frontend + backend).
+  - Integraciones con **Postgres (Supabase)**, **Resend**, **WhatsApp Cloud API**, **OpenAI**, **Sentry**, etc.
+  - Será la base sobre la que se construye el motor de agente de cobranzas.
+
+**Siempre** que vayas a proponer cambios de arquitectura, modelos o integraciones:
+- Lee y respeta `docs/architecture.md` y `docs/env-vars.md`.
+- Si algo no cuadra, primero propone actualizar esos documentos.
+
+---
+
+## 1. Arquitectura y estructura de carpetas
+
+### 1.1. Estructura principal
+
+Asumir la siguiente estructura estándar (no modificar sin muy buena razón):
+
+- `src/`
+  - `app/`  
+    - Rutas (App Router), layouts, API routes.
+  - `components/`  
+    - Componentes de UI reutilizables (shadcn/ui + componentes propios).
+  - `lib/`
+    - `domain/` → modelos y lógica de negocio pura (sin dependencias de framework).
+    - `services/` → casos de uso / orquestadores de aplicación.
+    - `repositories/` → acceso a datos vía Prisma.
+    - `integrations/` → adapters a servicios externos (Resend, WhatsApp, LLM, Sentry, etc.).
+    - `db.ts` → inicialización de Prisma Client.
+  - `emails/`
+    - Plantillas de email en React, para usar con Resend.
+
+- `docs/`
+  - `overview.md` → contexto de negocio.
+  - `architecture.md` → arquitectura detallada.
+  0  `env-vars.md` → definición de TODAS las variables de entorno.
+  - `mcps.md` → lista y propósito de MCPs.
+  - `roadmap.md` → milestones.
+
+- `.cursorrules` → este archivo, con reglas para Cursor.
+
+### 1.2. Capas lógicas
+
+Respetar la separación:
+
+- **Presentación (UI)** → `src/app`, `src/components`
+  - No contiene reglas de negocio complejas.
+  - Usa hooks y componentes de UI.
+
+- **Aplicación (casos de uso/servicios)** → `src/lib/services`
+  - Implementa casos de uso: crear cliente, registrar factura, lanzar flujo de cobranza, etc.
+  - Orquesta llamadas a dominio, repositorios e integraciones externas.
+
+- **Dominio** → `src/lib/domain`
+  - Modelos, tipos y lógica de negocio (estados de factura, workflow de cobranzas, etc.).
+  - Sin dependencias de frameworks ni SDKs externos.
+
+- **Infraestructura** → `src/lib/repositories`, `src/lib/integrations`, `src/lib/db.ts`
+  - Repositorios con Prisma.
+  - Integraciones con Resend, WhatsApp, LLM, Sentry, etc.
+  - No contienen lógica de dominio.
+
+---
+
+## 2. Stack y librerías
+
+### 2.1. Tecnologías base
+
+- **Next.js** (App Router) + **TypeScript**.
+- **React Compiler** activado.
+- **Tailwind CSS** como sistema de estilos.
+- **shadcn/ui** para componentes UI.
+- **Prisma** como ORM.
+- **PostgreSQL (Supabase)** como base de datos principal.
+- **Auth.js (NextAuth)** para autenticación (Google OAuth y otros proveedores).
+- **Resend** para emails.
+- **WhatsApp Cloud API (Meta)** para mensajería.
+- **OpenAI** como proveedor LLM principal (`LLM_PROVIDER=openai`).
+- **Sentry** para errores, logs y tracing.
+- **Playwright** para tests E2E.
+
+### 2.2. Convenciones de uso
+
+- Todo el código nuevo debe ser **TypeScript**.
+- Evitar `any` siempre que sea posible.
+- Usar tipos derivados de Prisma (`Prisma.User`, etc.) cuando tenga sentido.
+- Para validación de inputs en API routes, usar una librería de schemas (p.ej. Zod) si está disponible; si no, crear validaciones claras.
+
+---
+
+## 3. Multi-tenant y dominio de cobranzas
+
+### 3.1. Multi-tenant
+
+- El sistema es **multi-empresa (multi-tenant)**:
+  - La mayoría de las entidades persistentes deben tener `organizationId`.
+  - Toda query a BD debe ir filtrada por la organización actual, salvo tablas globales (ej. configuraciones generales, features flags).
+- Nunca mezclar datos de diferentes organizaciones:
+  - No devolver ni procesar entidades de otra organización.
+  - Antes de hacer operaciones masivas, asegurar que el filtro `organizationId` está presente.
+
+### 3.2. Entidades clave
+
+Para cualquier diseño de modelos/aplicación, asumir al menos estas entidades:
+
+- `Organization`, `User`, `Membership`.
+- `CustomerCompany`, `Contact`.
+- `Invoice`, `Installment` (si hay cuotas), `Payment`.
+- `CollectionCase` (estado de cobranzas para una factura).
+- `CommunicationAttempt` (mensajes enviados/recibidos).
+- `AgentRun` / `AgentActionLog` (acciones del agente de IA).
+
+Consultar `docs/architecture.md` para más detalle antes de crear tablas o modelos nuevos.
+
+---
+
+## 4. Seguridad, variables de entorno y secretos
+
+### 4.1. Variables de entorno
+
+- Las variables de entorno son la **única fuente de verdad** para:
+  - DB (`DATABASE_URL`, `DIRECT_URL`).
+  - Auth (`AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, etc.).
+  - Resend, WhatsApp Cloud, OpenAI, Sentry, MCPs, etc.
+- Los nombres y propósito de cada variable están documentados en `docs/env-vars.md`.
+- Mantener sincronizados:
+  - `docs/env-vars.md`
+  - `.env.example`
+
+**Reglas para Cursor:**
+
+- Nunca escribir valores reales de API keys o secretos en el código, tests, fixtures o docs.
+- Cuando se necesite una nueva variable de entorno:
+  1. Añadirla primero a `docs/env-vars.md`.
+  2. Añadir su entrada vacía a `.env.example`.
+  3. Usarla en código vía `process.env.VARIABLE_NAME`.
+- No inventar nombres al azar: usar la convención ya definida en `docs/env-vars.md`.
+
+### 4.2. Logs y datos sensibles
+
+- No loguear datos sensibles (tokens, passwords, llaves) ni contenido completo de mensajes de WhatsApp / email si no es estrictamente necesario.
+- Si se loguea algo relacionado con un cliente:
+  - Priorizar IDs y metadatos (IDs, estados, fechas) en vez de texto libre.
+
+---
+
+## 5. Integraciones y providers
+
+### 5.1. Base de datos (Prisma + Supabase)
+
+- Toda interacción con la BD debe hacerse a través de Prisma.
+- Configuración en `src/lib/db.ts`.
+- Repositorios:
+  - Crear repositorios en `src/lib/repositories` para conjuntos de entidades (ej. `invoiceRepository`, `collectionCaseRepository`, etc.).
+  - No mezclar lógica de dominio en los repositorios: solo queries y mapping.
+
+### 5.2. Email (Resend)
+
+- Implementar un provider de email en `src/lib/integrations/emailProvider.ts` (o similar).
+- El código de UI/casos de uso debe llamar a una abstracción tipo:
+
+  ```ts
+  await emailProvider.sendInvoiceReminder({...})
+  ```
+
+  en lugar de usar directamente el SDK de Resend dentro de la UI o dominio.
+- Plantillas de email en `src/emails/` como componentes React.
+- Configuración de credenciales:
+  - `RESEND_API_KEY`
+  - `RESEND_DEFAULT_FROM`
+  - Nunca hardcodear estos valores.
+
+### 5.3. WhatsApp Cloud API
+
+- Crear un provider en `src/lib/integrations/whatsappProvider.ts`.
+- Interacciones típicas:
+  - Enviar mensajes: `whatsappProvider.sendMessage(contact, message)`
+  - Parsear webhooks: `whatsappProvider.handleWebhook(payload)` (lógica en capa de servicios).
+- Usar variables:
+  - `WHATSAPP_API_BASE_URL`
+  - `WHATSAPP_ACCESS_TOKEN`
+  - `WHATSAPP_PHONE_NUMBER_ID`
+  - `WHATSAPP_BUSINESS_ACCOUNT_ID`
+  - `WHATSAPP_VERIFY_TOKEN`
+
+### 5.4. LLM (OpenAI)
+
+- Crear y usar un provider genérico, p.ej. `src/lib/integrations/llmProvider.ts`.
+- API propuesta:
+
+  ```ts
+  await llmProvider.generateCollectionMessage(context);
+  await llmProvider.classifyCustomerResponse(text);
+  ```
+
+- El provider decidirá según:
+  - `LLM_PROVIDER` (por ahora `openai`)
+  - `OPENAI_API_KEY`
+  - `OPENAI_MODEL`
+
+- No llamar directamente al SDK de OpenAI desde componentes ni lógica de dominio; siempre usar el provider.
+
+### 5.5. Sentry (overview, ver sección específica más abajo)
+
+- Usar `@sentry/nextjs`.
+- Configuración principal en archivos específicos de Sentry (client/server/edge).
+- No inicializar Sentry en otros sitios.
+- Usar `Sentry.captureException`, `Sentry.startSpan` y el logger según las reglas de la sección de Sentry más abajo.
+
+---
+
+## 6. MCPs (Model Context Protocol)
+
+Lista prevista de MCPs:
+
+- GitHub MCP
+- Supabase MCP
+- Vercel MCP
+- Resend MCP (o integración equivalente)
+- Sentry MCP (si aplica)
+- Playwright MCP
+- Context7 MCP
+- shadcn MCP (para generación de componentes)
+
+Reglas para uso de MCPs:
+
+1. **Credenciales**:
+   - Siempre se obtienen de variables de entorno (documentadas en `docs/env-vars.md`), NO se hardcodean.
+   - Ejemplos:
+     - `GITHUB_PERSONAL_ACCESS_TOKEN`
+     - `SUPABASE_URL`, `SUPABASE_TOKEN`
+     - `VERCEL_API_TOKEN`
+     - `CONTEXT7_API_KEY`
+
+2. **Permisos mínimos**:
+   - Los tokens deben tener los scopes mínimos para hacer lo que se necesita.
+   - No asumir acceso de escritura a todo salvo que el usuario lo pida explícitamente.
+
+3. **Uso orientado a tareas**:
+   - GitHub MCP: leer/crear issues, PRs, revisar código, etc. en el repo del proyecto.
+   - Supabase MCP: inspeccionar esquema de BD, ejecutar consultas de mantenimiento cuidadosamente.
+   - Vercel MCP: revisar deploys, logs, variables de entorno (solo lectura salvo indicación).
+   - Playwright MCP: ayudar a generar escenarios E2E.
+   - Context7 MCP: recuperar contexto/documentación relacionada (por ejemplo, docs internas del proyecto).
+
+4. **No auto-modificar infra crítica sin indicación**:
+   - No cambiar variables de entorno en Vercel/Supabase vía MCP sin instrucciones muy claras.
+
+---
+
+## 7. Calidad del código, estilo y testing
+
+- **TypeScript estricto**: evitar `any`, usar tipos explícitos.
+- **React/Next**:
+  - Usar Server Components siempre que sea posible.
+  - Usar Client Components solo cuando haya interacción de usuario o estado en el cliente.
+- **Testing**:
+  - Tests de dominio: lógica de estados de cobranzas y flujos del agente deben tener tests unitarios.
+  - Tests de integración: repositorios Prisma contra una DB de test.
+  - E2E: usar Playwright para flujos clave:
+    - Login con Google.
+    - Alta de empresa cliente/contactos.
+    - Creación de factura.
+    - Visualización en dashboard.
+
+---
+
+## 8. Reglas específicas de Sentry (texto proporcionado por Sentry – no modificar)
+
+These examples should be used as guidance when configuring Sentry functionality within a project.
+
+# Exception Catching
+
+Use `Sentry.captureException(error)` to capture an exception and log the error in Sentry.
+Use this in try catch blocks or areas where exceptions are expected
+
+# Tracing Examples
+
+Spans should be created for meaningful actions within an applications like button clicks, API calls, and function calls
+Use the `Sentry.startSpan` function to create a span
+Child spans can exist within a parent span
+
+## Custom Span instrumentation in component actions
+
+The `name` and `op` properties should be meaninful for the activities in the call.
+Attach attributes based on relevant information and metrics from the request
+
+```javascript
+function TestComponent() {
+  const handleTestButtonClick = () => {
+    // Create a transaction/span to measure performance
+    Sentry.startSpan(
+      {
+        op: "ui.click",
+        name: "Test Button Click",
+      },
+      (span) => {
+        const value = "some config";
+        const metric = "some metric";
+
+        // Metrics can be added to the span
+        span.setAttribute("config", value);
+        span.setAttribute("metric", metric);
+
+        doSomething();
+      },
+    );
+  };
+
+  return (
+    <button type="button" onClick={handleTestButtonClick}>
+      Test Sentry
+    </button>
+  );
+}
+```
+
+## Custom span instrumentation in API calls
+
+The `name` and `op` properties should be meaninful for the activities in the call.
+Attach attributes based on relevant information and metrics from the request
+
+```javascript
+async function fetchUserData(userId) {
+  return Sentry.startSpan(
+    {
+      op: "http.client",
+      name: `GET /api/users/${userId}`,
+    },
+    async () => {
+      const response = await fetch(`/api/users/${userId}`);
+      const data = await response.json();
+      return data;
+    },
+  );
+}
+```
+
+# Logs
+
+Where logs are used, ensure Sentry is imported using `import * as Sentry from "@sentry/nextjs"`
+Enable logging in Sentry using `Sentry.init({ _experiments: { enableLogs: true } })`
+Reference the logger using `const { logger } = Sentry`
+Sentry offers a consoleLoggingIntegration that can be used to log specific console error types automatically without instrumenting the individual logger calls
+
+## Configuration
+
+In NextJS the client side Sentry initialization is in `instrumentation-client.ts`, the server initialization is in `sentry.server.config.ts` and the edge initialization is in `sentry.edge.config.ts`
+Initialization does not need to be repeated in other files, it only needs to happen the files mentioned above. You should use `import * as Sentry from "@sentry/nextjs"` to reference Sentry functionality
+
+### Baseline
+
+```javascript
+import * as Sentry from "@sentry/nextjs";
+
+Sentry.init({
+  dsn: "https://3b59809a576af22204b2afd48816471d@o4509854301159424.ingest.us.sentry.io/4510325578399744",
+
+  _experiments: {
+    enableLogs: true,
+  },
+});
+```
+
+### Logger Integration
+
+```javascript
+Sentry.init({
+  dsn: "https://3b59809a576af22204b2afd48816471d@o4509854301159424.ingest.us.sentry.io/4510325578399744",
+  integrations: [
+    // send console.log, console.warn, and console.error calls as logs to Sentry
+    Sentry.consoleLoggingIntegration({ levels: ["log", "warn", "error"] }),
+  ],
+});
+```
+
+## Logger Examples
+
+`logger.fmt` is a template literal function that should be used to bring variables into the structured logs.
+
+```javascript
+logger.trace("Starting database connection", { database: "users" });
+logger.debug(logger.fmt`Cache miss for user: ${userId}`);
+logger.info("Updated profile", { profileId: 345 });
+logger.warn("Rate limit reached for endpoint", {
+  endpoint: "/api/results/",
+  isEnterprise: false,
+});
+logger.error("Failed to process payment", {
+  orderId: "order_123",
+  amount: 99.99,
+});
+logger.fatal("Database connection pool exhausted", {
+  database: "users",
+  activeConnections: 100,
+});
+```
+
+---
+
+## 9. Nota específica sobre el DSN de Sentry en este archivo
+
+- El DSN que aparece en los ejemplos anteriores es **de muestra**.
+- Para COBRA, **no** se debe hardcodear el DSN:
+  - Siempre usar `process.env.SENTRY_DSN`.
+  - El valor real de `SENTRY_DSN` se gestiona vía variables de entorno (ver `docs/env-vars.md` y configuración en Vercel).
