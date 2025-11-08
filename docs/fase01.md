@@ -25,6 +25,19 @@
 - **Entregable:** Login operativo en local con Google, usuario autenticado vinculado a una organización inicial, app corre sin errores, Sentry captura errores básicos.
 - **MCPs de apoyo:** Context7 para consultas de Auth.js/Prisma; Supabase MCP para validar tablas de usuarios/organizaciones; Vercel MCP para revisar variables tras despliegue (solo lectura).
 
+### Estado de implementación
+
+- ✅ Directorios base creados (`src/lib/{config,domain,services,repositories,integrations}` y `src/emails/`).
+- ✅ Utilidad centralizada de variables de entorno `src/lib/config/env.ts` con validaciones usando Zod.
+- ✅ Prisma Client singleton (`src/lib/db.ts`) y esquema ampliado con modelos Auth.js (Organization, User, Membership, Account, Session, VerificationToken).
+- ✅ NextAuth v5 + Google OAuth configurados (`src/lib/auth/index.ts`) con bootstrap multi-tenant (`ensurePrimaryMembership`).
+- ✅ Servicios auxiliares (`src/lib/services/session.ts`, `src/lib/services/organizations.ts`) disponibles.
+- ✅ Estructura UI inicial: marketing (`src/app/page.tsx`) y aplicación protegida (`src/app/(app)/layout.tsx`, `src/app/(app)/dashboard/page.tsx`).
+- ✅ Configuración básica de Sentry (`sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation.client.ts`).
+- ✅ Proyecto vinculado a Vercel (`.vercel/project.json`) y primer deploy exitoso (`npx vercel deploy --prod`).
+- ✅ Variables `NEXT_PUBLIC_APP_URL` y `AUTH_URL` configuradas en Vercel (`https://cobra.vercel.app`).
+- ⏳ Validar flujo completo de login local y envío de evento de prueba a Sentry.
+
 ## Fase 2 – Modelo de datos y dominio de cobranzas
 
 - **Objetivo:** Definir esquema Prisma y modelos de dominio que reflejen entidades clave multi-tenant y preparar migraciones aplicadas.

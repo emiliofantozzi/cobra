@@ -66,8 +66,22 @@ GITHUB_PERSONAL_ACCESS_TOKEN=
 SUPABASE_URL=
 SUPABASE_TOKEN=
 VERCEL_API_TOKEN=
+VERCEL_ORG_ID=
+VERCEL_PROJECT_ID=
+VERCEL_PROJECT_NAME=
 CONTEXT7_API_KEY=
 
 # Integraciones futuras (ej. pagos)
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
+# 2. Vercel
+
+| Variable             | Entorno         | Descripción / Valor actual                                    |
+|----------------------|-----------------|---------------------------------------------------------------|
+| `VERCEL_API_TOKEN`   | Local / CI      | Token personal con acceso mínimo al proyecto (no commitear). |
+| `VERCEL_ORG_ID`      | Todos           | Identificador del equipo en Vercel. Para COBRA: `team_95DKBHWDy7tkYvpGVvclcgWb`. |
+| `VERCEL_PROJECT_ID`  | Todos           | ID interno del proyecto. Para COBRA: `prj_7z8QB0pVkyPLAKKgzwx1UyistJp5`. |
+| `VERCEL_PROJECT_NAME`| Todos           | Slug del proyecto en Vercel. Para COBRA: `cobra`.            |
+
+> Estos valores se reflejan también en `.vercel/project.json`. Mantenerlos sincronizados evita errores al usar `vercel deploy` o integraciones automatizadas.
+
