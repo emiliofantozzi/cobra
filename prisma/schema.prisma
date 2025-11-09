@@ -9,25 +9,47 @@ datasource db {
 }
 
 model Organization {
-  id           String        @id @default(cuid())
-  name         String
-  slug         String?       @unique
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  memberships  Membership[]
+  id                 String                 @id @default(cuid())
+  name               String
+  normalizedName     String
+  slug               String?                @unique
+  countryCode        String?
+  defaultCurrency    String?                @default("USD")
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  memberships        Membership[]
+  customerCompanies  CustomerCompany[]
+  contacts           Contact[]
+  invoices           Invoice[]
+  installments       Installment[]
+  payments           Payment[]
+  collectionCases    CollectionCase[]
+  communicationLogs  CommunicationAttempt[]
+  agentRuns          AgentRun[]
+  agentActionLogs    AgentActionLog[]
+  agentConfig        AgentConfig?
+  activeUsers        User[]                 @relation("ActiveOrganization")
+  organizationCreationIdempotency OrganizationCreationIdempotency[]
+
+  @@index([normalizedName])
 }
 
 model User {
-  id              String        @id @default(cuid())
-  name            String?
-  email           String?       @unique
-  emailVerified   DateTime?
-  image           String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  accounts        Account[]
-  sessions        Session[]
-  memberships     Membership[]
+  id                  String        @id @default(cuid())
+  name                String?
+  email               String?       @unique
+  emailVerified       DateTime?
+  image               String?
+  activeOrganizationId String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  accounts            Account[]
+  sessions            Session[]
+  memberships         Membership[]
+  activeOrganization  Organization? @relation("ActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
+  organizationCreationIdempotency OrganizationCreationIdempotency[]
+
+  @@index([activeOrganizationId])
 }
 
 model Membership {
@@ -44,6 +66,21 @@ model Membership {
   @@unique([userId, organizationId])
   @@index([organizationId])
   @@index([userId])
+}
+
+model AgentConfig {
+  id                String        @id @default(cuid())
+  organizationId    String        @unique
+  defaultTimezone   String?
+  escalationEmail   String?
+  escalationPhone   String?
+  escalationChannel CommunicationChannel?
+  llmModel          String?
+  workingHours      Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
 
 enum MembershipRole {
@@ -92,4 +129,359 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model CustomerCompany {
+  id               String                 @id @default(cuid())
+  organizationId   String
+  name             String
+  legalName        String?
+  taxId            String?
+  status           CustomerCompanyStatus  @default(ACTIVE)
+  industry         String?
+  website          String?
+  notes            String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  archivedAt       DateTime?
+
+  organization     Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts         Contact[]
+  invoices         Invoice[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("customer_companies")
+}
+
+enum CustomerCompanyStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+model Contact {
+  id                 String                 @id @default(cuid())
+  organizationId     String
+  customerCompanyId  String
+  firstName          String?
+  lastName           String?
+  email              String?
+  phoneNumber        String?
+  whatsappNumber     String?
+  position           String?
+  notes              String?
+  isPrimary          Boolean                @default(false)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  organization       Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerCompany    CustomerCompany        @relation(fields: [customerCompanyId], references: [id], onDelete: Cascade)
+  communicationLogs  CommunicationAttempt[]
+  primaryCollectionCases CollectionCase[]   @relation("PrimaryContact")
+
+  @@index([organizationId])
+  @@index([customerCompanyId])
+  @@index([email])
+  @@map("contacts")
+}
+
+model Invoice {
+  id                 String            @id @default(cuid())
+  organizationId     String
+  customerCompanyId  String
+  number             String?
+  description        String?
+  issueDate          DateTime
+  dueDate            DateTime
+  amount             Decimal
+  currency           String            @default("USD")
+  status             InvoiceStatus     @default(PENDING)
+  notes              String?
+  metadata           Json?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerCompany    CustomerCompany   @relation(fields: [customerCompanyId], references: [id], onDelete: Cascade)
+  installments       Installment[]
+  payments           Payment[]
+  collectionCase     CollectionCase?
+
+  @@index([organizationId])
+  @@index([customerCompanyId])
+  @@index([status])
+  @@unique([organizationId, number], map: "invoice_number_per_org")
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model Installment {
+  id               String            @id @default(cuid())
+  organizationId   String
+  invoiceId        String
+  sequence         Int
+  dueDate          DateTime
+  amount           Decimal
+  status           InstallmentStatus @default(PENDING)
+  paidAmount       Decimal           @default(0)
+  paidAt           DateTime?
+  notes            String?
+  metadata         Json?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoice          Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  payments         Payment[]
+
+  @@index([organizationId])
+  @@index([invoiceId])
+  @@index([status])
+  @@unique([invoiceId, sequence])
+  @@map("installments")
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model Payment {
+  id               String         @id @default(cuid())
+  organizationId   String
+  invoiceId        String
+  installmentId    String?
+  amount           Decimal
+  currency         String         @default("USD")
+  paidAt           DateTime?
+  method           String?
+  reference        String?
+  status           PaymentStatus  @default(PENDING)
+  notes            String?
+  metadata         Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoice          Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  installment      Installment?   @relation(fields: [installmentId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([invoiceId])
+  @@index([installmentId])
+  @@index([status])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+model CollectionCase {
+  id                   String                @id @default(cuid())
+  organizationId       String
+  invoiceId            String                @unique
+  primaryContactId     String?
+  stage                CollectionStage       @default(INITIAL)
+  status               CollectionCaseStatus  @default(ACTIVE)
+  riskLevel            CollectionRiskLevel?  @default(MEDIUM)
+  lastCommunicationAt  DateTime?
+  nextActionAt         DateTime?
+  lastAgentActionAt    DateTime?
+  escalationAt         DateTime?
+  closedAt             DateTime?
+  summary              String?
+  metadata             Json?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoice              Invoice               @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  primaryContact       Contact?              @relation("PrimaryContact", fields: [primaryContactId], references: [id], onDelete: SetNull)
+  communicationLogs    CommunicationAttempt[]
+  agentRuns            AgentRun[]
+  agentActionLogs      AgentActionLog[]
+
+  @@index([organizationId])
+  @@index([stage])
+  @@index([status])
+  @@map("collection_cases")
+}
+
+enum CollectionStage {
+  INITIAL
+  REMINDER_1
+  REMINDER_2
+  ESCALATED
+  PROMISE_TO_PAY
+  RESOLVED
+  MANUAL_REVIEW
+}
+
+enum CollectionCaseStatus {
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum CollectionRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model CommunicationAttempt {
+  id                 String                   @id @default(cuid())
+  organizationId     String
+  collectionCaseId   String
+  contactId          String?
+  channel            CommunicationChannel
+  direction          CommunicationDirection
+  status             CommunicationStatus      @default(PENDING)
+  subject            String?
+  body               String?
+  payload            Json?
+  externalId         String?
+  sentAt             DateTime?
+  deliveredAt        DateTime?
+  readAt             DateTime?
+  error              String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  organization       Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  collectionCase     CollectionCase           @relation(fields: [collectionCaseId], references: [id], onDelete: Cascade)
+  contact            Contact?                 @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([collectionCaseId])
+  @@index([contactId])
+  @@index([channel])
+  @@index([status])
+  @@map("communication_attempts")
+}
+
+enum CommunicationChannel {
+  EMAIL
+  WHATSAPP
+  SMS
+  PHONE
+  OTHER
+}
+
+enum CommunicationDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum CommunicationStatus {
+  DRAFT
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  ACKNOWLEDGED
+}
+
+model AgentRun {
+  id                 String          @id @default(cuid())
+  organizationId     String
+  collectionCaseId   String
+  status             AgentRunStatus  @default(PENDING)
+  startedAt          DateTime?       @default(now())
+  finishedAt         DateTime?
+  error              String?
+  metadata           Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  organization       Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  collectionCase     CollectionCase  @relation(fields: [collectionCaseId], references: [id], onDelete: Cascade)
+  actions            AgentActionLog[]
+
+  @@index([organizationId])
+  @@index([collectionCaseId])
+  @@index([status])
+  @@map("agent_runs")
+}
+
+enum AgentRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model AgentActionLog {
+  id                 String            @id @default(cuid())
+  organizationId     String
+  agentRunId         String
+  collectionCaseId   String
+  type               AgentActionType
+  status             AgentActionStatus @default(SUCCEEDED)
+  summary            String?
+  payload            Json?
+  error              String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agentRun           AgentRun          @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  collectionCase     CollectionCase    @relation(fields: [collectionCaseId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([agentRunId])
+  @@index([collectionCaseId])
+  @@index([type])
+  @@map("agent_action_logs")
+}
+
+enum AgentActionType {
+  SEND_MESSAGE
+  SCHEDULE_FOLLOW_UP
+  UPDATE_STATUS
+  ESCALATE
+  CLOSE_CASE
+  CLASSIFY_RESPONSE
+  LOG_NOTE
+}
+
+enum AgentActionStatus {
+  PENDING
+  IN_PROGRESS
+  SUCCEEDED
+  FAILED
+}
+
+model OrganizationCreationIdempotency {
+  id             String       @id @default(cuid())
+  userId         String
+  idempotencyKey String       @unique
+  organizationId String
+  createdAt      DateTime     @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([idempotencyKey])
+  @@index([organizationId])
+  @@map("organization_creation_idempotency")
 }

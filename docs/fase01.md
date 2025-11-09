@@ -35,7 +35,10 @@
 - ✅ Estructura UI inicial: marketing (`src/app/page.tsx`) y aplicación protegida (`src/app/(app)/layout.tsx`, `src/app/(app)/dashboard/page.tsx`).
 - ✅ Configuración básica de Sentry (`sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation.client.ts`).
 - ✅ Proyecto vinculado a Vercel (`.vercel/project.json`) y primer deploy exitoso (`npx vercel deploy --prod`).
-- ✅ Variables `NEXT_PUBLIC_APP_URL` y `AUTH_URL` configuradas en Vercel (`https://cobra.vercel.app`).
+- ✅ Variables `NEXT_PUBLIC_APP_URL` y `AUTH_URL` configuradas en Vercel (`https://hqhelios.com` para producción).
+- ✅ NextAuth configurado para usar `AUTH_URL` como dominio base fijo (`url: env.AUTH_URL`), asegurando que los callbacks OAuth siempre usen `hqhelios.com` independientemente del dominio de acceso.
+- ✅ Callback `redirect` implementado para manejar redirecciones post-login correctamente.
+- ✅ Página raíz actualizada para detectar usuarios autenticados y redirigirlos automáticamente al dashboard.
 - ⏳ Validar flujo completo de login local y envío de evento de prueba a Sentry.
 
 ## Fase 2 – Modelo de datos y dominio de cobranzas

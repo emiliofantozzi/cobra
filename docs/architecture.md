@@ -30,7 +30,37 @@ La plataforma es una aplicación SaaS multi-empresa que:
 
 ---
 
-## 2. Objetivos arquitectónicos
+## 2. Estado actual del proyecto
+
+### 2.1. Fase 1 completada ✅
+
+- **Esqueleto técnico**: Next.js (App Router) con TypeScript configurado.
+- **Autenticación**: Auth.js con Google OAuth implementado y funcionando.
+- **Multi-tenant**: Bootstrap de organizaciones y membresías operativo.
+- **Base de datos**: Prisma Client inicializado y conectado a Supabase PostgreSQL.
+- **Observabilidad**: Sentry configurado para errores y tracing básico.
+
+### 2.2. Fase 2 completada ✅
+
+- **Modelo de datos**: Esquema Prisma completo con todas las entidades de cobranzas:
+  - `CustomerCompany`, `Contact`
+  - `Invoice`, `Installment`, `Payment`
+  - `CollectionCase`, `CommunicationAttempt`
+  - `AgentConfig`, `AgentRun`, `AgentActionLog`
+- **Dominio**: Módulos de dominio con invariantes y reglas de negocio implementados.
+- **Repositorios**: Implementaciones Prisma completas para todas las entidades con filtrado multi-tenant.
+- **Servicios**: Servicios de aplicación creados para orquestar dominio y repositorios.
+- **Migraciones**: Esquema aplicado a la base de datos Supabase.
+
+### 2.3. Próximos pasos (Fase 3)
+
+- Implementar CRUDs principales con UI (shadcn/ui).
+- Integrar servicios con server actions/API routes.
+- Construir dashboard y vistas de gestión.
+
+---
+
+## 3. Objetivos arquitectónicos
 
 ### 2.1. Objetivos funcionales
 
@@ -64,7 +94,7 @@ La plataforma es una aplicación SaaS multi-empresa que:
 
 ---
 
-## 3. Stack tecnológico
+## 4. Stack tecnológico
 
 ### 3.1. Frontend + Backend (fullstack web)
 
@@ -89,6 +119,11 @@ La plataforma es una aplicación SaaS multi-empresa que:
 - **Auth.js** (NextAuth) para autenticación:
   - Proveedores OAuth (Google, etc.).
   - Sesiones y control de acceso.
+  - Configuración de dominio base fijo mediante `AUTH_URL` para callbacks OAuth (siempre usa `app.hqhelios.com` en producción).
+  - **Split de dominios**: La plataforma usa dos dominios principales:
+    - `www.hqhelios.com` / `hqhelios.com`: Landing page de marketing
+    - `app.hqhelios.com`: Aplicación de producto (auth, dashboard, etc.)
+  - El middleware de Next.js (`middleware.ts`) enruta automáticamente según el hostname.
 
 ### 3.4. Integraciones externas
 
@@ -107,7 +142,7 @@ La plataforma es una aplicación SaaS multi-empresa que:
 
 ---
 
-## 4. Arquitectura lógica por capas
+## 5. Arquitectura lógica por capas
 
 La aplicación se organiza en 4 capas principales:
 
@@ -207,30 +242,134 @@ Implementación:
 
 ---
 
-## 5. Módulos funcionales principales
+## 6. Modelo de datos
 
-### 5.1. Autenticación y multi-tenant
+### 6.1. Entidades principales
+
+El modelo de datos está completamente definido en `prisma/schema.prisma` y aplicado a la base de datos. Todas las entidades incluyen `organizationId` para garantizar aislamiento multi-tenant.
+
+#### Organizaciones y usuarios
+- **Organization**: Empresas usuarias de la plataforma.
+  - Campos: nombre, `normalizedName` (nombre normalizado para unicidad), slug, `countryCode` (opcional), `defaultCurrency` (por defecto "USD").
+  - **Invariante de unicidad**: Un usuario no puede tener dos organizaciones con el mismo `normalizedName` (normalización: trim, minúsculas, remover acentos, colapsar espacios).
+  - Relación con `User` a través de `Membership`.
+- **User**: Usuarios del sistema (autenticados vía Auth.js).
+  - Campo `activeOrganizationId`: referencia a la organización activa del usuario.
+  - Un usuario puede tener múltiples organizaciones pero solo una activa a la vez.
+- **Membership**: Relación User ↔ Organization con roles (OWNER, ADMIN, MEMBER, VIEWER).
+- **OrganizationCreationIdempotency**: Tabla para garantizar idempotencia en la creación de organizaciones.
+  - Evita duplicados por reintentos/transmisiones duplicadas del mismo intento de creación.
+  - Clave única: `idempotencyKey` derivada de sesión e intento de creación.
+
+#### Clientes y contactos
+- **CustomerCompany**: Empresas clientes de la organización usuaria.
+  - Estados: `ACTIVE`, `INACTIVE`, `ARCHIVED`.
+  - Campos: nombre, razón social, taxId, industria, website, notas.
+- **Contact**: Personas de contacto dentro de cada empresa cliente.
+  - Canales: email, phoneNumber, whatsappNumber.
+  - Soporta contacto primario (`isPrimary`).
+
+#### Facturación y pagos
+- **Invoice**: Facturas emitidas a empresas clientes.
+  - Estados: `DRAFT`, `PENDING`, `PARTIALLY_PAID`, `PAID`, `OVERDUE`, `CANCELLED`.
+  - Campos: número, descripción, fechas (emisión/vencimiento), monto, moneda, notas, metadata.
+- **Installment**: Cuotas de pago asociadas a una factura.
+  - Estados: `PENDING`, `PAID`, `OVERDUE`, `CANCELLED`.
+  - Campos: secuencia, fecha de vencimiento, monto, monto pagado, fecha de pago.
+- **Payment**: Registros de pagos recibidos.
+  - Estados: `PENDING`, `COMPLETED`, `FAILED`, `CANCELLED`, `REFUNDED`.
+  - Campos: monto, moneda, método, referencia, fecha de pago, notas.
+
+#### Cobranzas
+- **CollectionCase**: Caso de cobranza asociado a una factura (relación 1:1).
+  - Etapas (`stage`): `INITIAL`, `REMINDER_1`, `REMINDER_2`, `ESCALATED`, `PROMISE_TO_PAY`, `RESOLVED`, `MANUAL_REVIEW`.
+  - Estados (`status`): `ACTIVE`, `PAUSED`, `CLOSED`.
+  - Niveles de riesgo (`riskLevel`): `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
+  - Campos: contacto primario, fechas de comunicación/acción/escalación/cierre, resumen, metadata.
+- **CommunicationAttempt**: Registro de cada intento de comunicación (saliente o entrante).
+  - Canales (`channel`): `EMAIL`, `WHATSAPP`, `SMS`, `PHONE`, `OTHER`.
+  - Direcciones (`direction`): `OUTBOUND`, `INBOUND`.
+  - Estados (`status`): `DRAFT`, `PENDING`, `SENT`, `DELIVERED`, `FAILED`, `ACKNOWLEDGED`.
+  - Campos: asunto, cuerpo, payload, externalId, timestamps (enviado/entregado/leído), errores.
+
+#### Agente de IA
+- **AgentConfig**: Configuración del agente por organización (relación 1:1).
+  - Campos: timezone por defecto, email/teléfono de escalación, canal de escalación, modelo LLM, horarios de trabajo.
+- **AgentRun**: Ejecución del agente sobre un caso de cobranza.
+  - Estados: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`.
+  - Campos: fechas de inicio/fin, error, metadata.
+- **AgentActionLog**: Log de cada acción ejecutada por el agente durante un run.
+  - Tipos (`type`): `SEND_MESSAGE`, `SCHEDULE_FOLLOW_UP`, `UPDATE_STATUS`, `ESCALATE`, `CLOSE_CASE`, `CLASSIFY_RESPONSE`, `LOG_NOTE`.
+  - Estados (`status`): `PENDING`, `IN_PROGRESS`, `SUCCEEDED`, `FAILED`.
+  - Campos: resumen, payload, error.
+
+### 6.2. Relaciones principales
+
+- `Organization` 1–N `CustomerCompany`
+- `CustomerCompany` 1–N `Contact`
+- `CustomerCompany` 1–N `Invoice`
+- `Invoice` 1–N `Installment`
+- `Invoice` 1–N `Payment`
+- `Invoice` 1–1 `CollectionCase`
+- `CollectionCase` 1–N `CommunicationAttempt`
+- `CollectionCase` 1–N `AgentRun`
+- `CollectionCase` 1–N `AgentActionLog`
+- `Contact` 1–N `CollectionCase` (como contacto primario)
+- `Organization` 1–1 `AgentConfig`
+
+### 6.3. Enumeraciones clave
+
+Las enumeraciones reflejan el workflow de cobranzas y del agente:
+
+- **InvoiceStatus**: Estados de facturación (`DRAFT`, `PENDING`, `PARTIALLY_PAID`, `PAID`, `OVERDUE`, `CANCELLED`).
+- **CollectionStage**: Etapas del proceso de cobranza (`INITIAL`, `REMINDER_1`, `REMINDER_2`, `ESCALATED`, `PROMISE_TO_PAY`, `RESOLVED`, `MANUAL_REVIEW`).
+- **CollectionCaseStatus**: Estado operativo del caso (`ACTIVE`, `PAUSED`, `CLOSED`).
+- **CollectionRiskLevel**: Nivel de riesgo (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+- **CommunicationChannel**: Canales de comunicación (`EMAIL`, `WHATSAPP`, `SMS`, `PHONE`, `OTHER`).
+- **CommunicationStatus**: Estados de comunicación (`DRAFT`, `PENDING`, `SENT`, `DELIVERED`, `FAILED`, `ACKNOWLEDGED`).
+- **AgentRunStatus**: Estados de ejecución del agente (`PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`).
+- **AgentActionType**: Tipos de acciones del agente (`SEND_MESSAGE`, `SCHEDULE_FOLLOW_UP`, `UPDATE_STATUS`, `ESCALATE`, `CLOSE_CASE`, `CLASSIFY_RESPONSE`, `LOG_NOTE`).
+
+---
+
+## 7. Módulos funcionales principales
+
+### 7.1. Autenticación y multi-tenant
 
 Objetivo:
 
 - Cada organización (empresa usuaria) tiene su propio espacio de datos.
 - Un usuario puede pertenecer a una o varias organizaciones (según diseño).
 - Control de acceso por roles (admin, cobranzas, lectura).
+- El usuario tiene una **organización activa** que determina qué datos ve y gestiona.
 
 Entidades clave:
 
-- `Organization`
-- `User`
+- `Organization` (con campos `countryCode`, `defaultCurrency`)
+- `User` (con campo `activeOrganizationId` para rastrear la organización activa)
 - `Membership` (User ↔ Organization)
 - `Role` o enumeración de roles.
 
 Mecánica:
 
 - Auth.js maneja la autenticación (ej. Google OAuth).
-- Tras login, se asocia el usuario a una `Organization`.
-- Todas las consultas a la BD se filtran por `organizationId`.
+- **Configuración de dominio base**: NextAuth está configurado para usar `AUTH_URL` como dominio base fijo para todos los callbacks OAuth. Esto asegura que siempre use `hqhelios.com` en producción, independientemente del dominio desde el cual se acceda (por ejemplo, desde dominios de Vercel como `cobra-mu-khaki.vercel.app`). Esta configuración evita errores de `redirect_uri_mismatch` en Google Cloud Console.
+- **Flujo post-login**:
+  - Si el usuario no tiene organizaciones, se redirige a `/onboarding/organization` para crear su primera organización.
+  - Si el usuario tiene organizaciones pero ninguna activa, también se redirige al onboarding.
+  - La organización creada se establece automáticamente como activa (`activeOrganizationId` en `User`).
+- **Creación de organización**:
+  - **Idempotencia**: Cada intento de creación incluye una clave de idempotencia única. Reintentos con la misma clave retornan la organización existente sin crear duplicados.
+  - **Unicidad de nombre**: Se valida que no exista otra organización del mismo usuario con el mismo `normalizedName`. Si existe, se retorna la organización existente y se establece como activa.
+  - **Prevención de múltiples envíos**: El formulario de onboarding deshabilita el botón y previene clics múltiples durante el procesamiento.
+  - **Navegación automática**: Tras creación exitosa (o detección de duplicado), se navega automáticamente al dashboard sin intervención del usuario.
+- **Organización activa**:
+  - El usuario puede cambiar su organización activa mediante un selector en el header.
+  - La sesión de NextAuth incluye la información de la organización activa.
+  - Todas las consultas a la BD se filtran por `organizationId` de la organización activa.
+  - El layout de la app (`(app)/layout.tsx`) verifica que haya organización activa y redirige al onboarding si no existe.
 
-### 5.2. Gestión de empresas clientes y contactos
+### 7.2. Gestión de empresas clientes y contactos
 
 Objetivo:
 
@@ -255,7 +394,7 @@ UI:
 - Listados de empresas clientes.
 - Fichas de cliente con contactos y estado de cobranza.
 
-### 5.3. Facturas, cuotas y estado de cobranza
+### 7.3. Facturas, cuotas y estado de cobranza
 
 Objetivo:
 
@@ -287,7 +426,7 @@ Estado de cobranza:
     - `nextActionAt`
     - `agentStatus` (ej. `ACTIVE`, `PAUSED`, `STOPPED`).
 
-### 5.4. Motor de cobranzas y agente de IA
+### 7.4. Motor de cobranzas y agente de IA
 
 Este es el núcleo del producto.
 
@@ -338,9 +477,9 @@ Entidades adicionales:
 
 ---
 
-## 6. Integraciones externas (detalle)
+## 8. Integraciones externas (detalle)
 
-### 6.1. Email (Resend)
+### 8.1. Email (Resend)
 
 - La aplicación usa un proveedor tipo Resend para enviar correos:
   - Notificaciones de cobranza.
@@ -374,7 +513,7 @@ Entidades adicionales:
 
 ---
 
-## 7. Infraestructura y despliegue
+## 9. Infraestructura y despliegue
 
 ### 7.1. Entornos
 

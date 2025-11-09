@@ -1,41 +1,56 @@
-import { getCurrentSession } from "@/lib/services/session";
+import { requireSession } from "@/lib/services/session";
+import { getServices } from "@/lib/services/get-services";
+import { SummaryCards } from "@/components/dashboard/summary-cards";
+import { CaseStatusTable } from "@/components/dashboard/case-status-table";
 
 export default async function DashboardPage() {
-  const session = await getCurrentSession();
+  const session = await requireSession({ redirectTo: "/" });
+
+  // El layout ya verifica que haya organización activa, así que podemos asumir que existe
+  if (!session.organization?.id) {
+    return null; // Esto no debería ocurrir, pero por seguridad
+  }
+
+  const context = {
+    organizationId: session.organization.id,
+    actorId: session.user.id,
+  };
+
+  const { customersService, invoicesService, collectionCasesService } =
+    getServices(context);
+
+  const [customersResult, invoicesResult, casesResult] = await Promise.all([
+    customersService.listCustomerCompanies(context, { pagination: { limit: 1 } }),
+    invoicesService.listInvoices(context, { pagination: { limit: 1 } }),
+    collectionCasesService.listCollectionCases(context, {
+      status: ["ACTIVE"],
+      pagination: { limit: 10 },
+    }),
+  ]);
+
+  const overdueInvoices = await invoicesService.listInvoices(context, {
+    status: ["OVERDUE"],
+    pagination: { limit: 1 },
+  });
 
   return (
-    <section className="flex flex-col gap-8">
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-slate-900">
-          ¡Bienvenido a COBRA!
-        </h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Estás autenticado como{" "}
-          <span className="font-medium text-slate-900">
-            {session?.user?.email ?? session?.user?.name ?? "usuario"}
-          </span>
-          .
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-muted-foreground">
+          Resumen de tu actividad de cobranzas
         </p>
-        {session?.organization ? (
-          <p className="mt-1 text-sm text-slate-600">
-            Organización activa:{" "}
-            <span className="font-medium text-slate-900">
-              {session.organization.name}
-            </span>
-          </p>
-        ) : null}
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-6 text-sm text-slate-500">
-          Aquí verás el estado de tus facturas y el timeline de cobranzas una
-          vez que completemos las próximas fases.
-        </div>
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-6 text-sm text-slate-500">
-          Próximamente: flujos automáticos de email, WhatsApp y acciones del
-          agente de IA.
-        </div>
-      </div>
-    </section>
+
+      <SummaryCards
+        totalCustomers={customersResult.totalCount}
+        totalInvoices={invoicesResult.totalCount}
+        activeCases={casesResult.totalCount}
+        overdueInvoices={overdueInvoices.totalCount}
+      />
+
+      <CaseStatusTable cases={casesResult.data} />
+    </div>
   );
 }
 

@@ -13,6 +13,8 @@ declare module "next-auth" {
       id: string;
       name: string;
       slug: string | null;
+      countryCode?: string | null;
+      defaultCurrency?: string | null;
     };
   }
 }

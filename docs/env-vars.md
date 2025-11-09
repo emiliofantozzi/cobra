@@ -28,7 +28,13 @@ Plantilla base:
 
 ```env
 # App
+# URL pública de la aplicación (usado para links y redirects)
+# En producción: https://app.hqhelios.com
 NEXT_PUBLIC_APP_URL=
+
+# URL base para autenticación OAuth (callbacks de Google, etc.)
+# En producción: https://app.hqhelios.com (debe apuntar al subdominio app)
+# Esta URL se usa para los redirect_uri de OAuth y debe coincidir con la configurada en Google Cloud Console
 AUTH_URL=
 
 # Auth (Auth.js + Google OAuth)

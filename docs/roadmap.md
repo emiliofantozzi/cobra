@@ -9,7 +9,7 @@
 - Confirmación: entiendo y respetaré las reglas de `.cursorrules`, especialmente no hardcodear secretos, usar providers y mantener capas separadas, así como el uso obligatorio de variables de entorno según `docs/env-vars.md`.
 
 
-## Fase 1 – Esqueleto técnico, Auth y wiring básico
+## Fase 1 – Esqueleto técnico, Auth y wiring básico ✅ COMPLETADA
 
 - **Objetivo:** Tener una app Next.js operativa con autenticación Google vía Auth.js, estructura de carpetas alineada, Prisma Client inicializado, lectura de variables de entorno clave y Sentry configurado mínimamente.
 - **Tareas generales:**
@@ -20,25 +20,25 @@
 5. Verificar lectura de variables críticas (`AUTH_SECRET`, `DATABASE_URL`, `GOOGLE_CLIENT_ID/SECRET`, `SENTRY_DSN`) usando `process.env` con errores descriptivos.
 6. Configurar `sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation-client.ts` para inicialización básica usando variables de entorno.
 
-- **Archivos a crear/modificar:** `plan-roadmap.md`, `prisma/schema.prisma` (si requiere ajuste mínimo para usuarios/orgs), `src/app/api/auth/[...nextauth]/route.ts`, `src/lib/db.ts`, `src/lib/services/session` (si aplica), `sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation.client.ts`, `.env.example`/`docs/env-vars.md` (solo si surge variable nueva, evitando tocar valores reales).
+- **Archivos creados/modificados:** `prisma/schema.prisma` (usuarios/orgs), `src/app/api/auth/[...nextauth]/route.ts`, `src/lib/db.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation.client.ts`, `.env.example`/`docs/env-vars.md`.
 - **Dependencias:** Punto de partida; no depende de fases previas.
-- **Entregable:** Login operativo en local con Google, usuario autenticado vinculado a una organización inicial, app corre sin errores, Sentry captura errores básicos.
+- **Entregable:** ✅ Login operativo en local con Google, usuario autenticado vinculado a una organización inicial, app corre sin errores, Sentry captura errores básicos.
 - **MCPs de apoyo:** Context7 para consultas de Auth.js/Prisma; Supabase MCP para validar tablas de usuarios/organizaciones; Vercel MCP para revisar variables tras despliegue (solo lectura).
 
-## Fase 2 – Modelo de datos y dominio de cobranzas
+## Fase 2 – Modelo de datos y dominio de cobranzas ✅ COMPLETADA
 
 - **Objetivo:** Definir esquema Prisma y modelos de dominio que reflejen entidades clave multi-tenant y preparar migraciones aplicadas.
 - **Tareas concretas:**
 
-1. Diseñar tablas en `prisma/schema.prisma` para Organization, User, Membership, CustomerCompany, Contact, Invoice, Installment, Payment, CollectionCase, CommunicationAttempt, AgentRun, AgentActionLog.
-2. Ejecutar migraciones (`pnpm prisma migrate dev`) asegurando vínculos por `organizationId`.
-3. Crear tipos/lógica en `src/lib/domain/*` representando estados de cobranza y entidades con invariantes básicas.
-4. Implementar repositorios iniciales en `src/lib/repositories/*` (CRUD básico) garantizando filtros por `organizationId`.
-5. Actualizar documentación (`docs/architecture.md`, `docs/env-vars.md` si hubiese nuevas env vars) coherente con el modelo.
+1. ✅ Diseñar tablas en `prisma/schema.prisma` para Organization, User, Membership, CustomerCompany, Contact, Invoice, Installment, Payment, CollectionCase, CommunicationAttempt, AgentRun, AgentActionLog.
+2. ✅ Ejecutar migraciones (`npx prisma migrate dev`) asegurando vínculos por `organizationId`.
+3. ✅ Crear tipos/lógica en `src/lib/domain/*` representando estados de cobranza y entidades con invariantes básicas.
+4. ✅ Implementar repositorios Prisma en `src/lib/repositories/*` (CRUD completo) garantizando filtros por `organizationId`.
+5. ✅ Actualizar documentación (`docs/architecture.md`, `docs/fase02.md`, `docs/roadmap.md`) coherente con el modelo.
 
-- **Archivos a crear/modificar:** `prisma/schema.prisma`, `prisma/migrations/*`, `src/lib/domain/*.ts`, `src/lib/repositories/*.ts`, `docs/architecture.md` (sección modelo), `plan-roadmap.md` (estado de fase).
+- **Archivos creados/modificados:** `prisma/schema.prisma`, `prisma/migrations/20251108195037_fase_2_modelado/`, `src/lib/domain/**/*.ts`, `src/lib/repositories/*.ts`, `src/lib/services/*.ts`, `docs/architecture.md`, `docs/fase02.md`, `docs/roadmap.md`.
 - **Dependencias:** Requiere Fase 1 (Auth y Prisma configurados).
-- **Entregable:** Migraciones aplicadas sin errores, dominios tipados disponibles, repositorios retornan datos filtrados por organización.
+- **Entregable:** ✅ Migraciones aplicadas sin errores, dominios tipados disponibles, repositorios Prisma implementados y retornan datos filtrados por organización, servicios de aplicación creados.
 - **MCPs de apoyo:** Supabase MCP para validar esquema en la BD; Context7 para referencias Prisma; GitHub MCP para corroborar convenciones; Playwright MCP aún no necesario.
 
 ## Fase 3 – CRUDs principales (UI + API)
@@ -120,3 +120,4 @@
 - **Dependencias:** Requiere Fases 1-6 completas.
 - **Entregable:** Suite de tests pasando, observabilidad afinada, checklist de seguridad completada.
 - **MCPs de apoyo:** Sentry MCP para validar métricas, Playwright MCP para generar/ejecutar tests, GitHub MCP para revisar PRs finales.
+

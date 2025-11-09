@@ -1,7 +1,8 @@
-import Link from "next/link";
-
-import { signOut } from "@/lib/auth";
+import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/services/session";
+import { getActiveOrganization, getUserOrganizations } from "@/lib/services/organizations";
+import { AppSidebar } from "@/components/layout/app-sidebar";
+import { AppHeader } from "@/components/layout/app-header";
 
 type AppLayoutProps = {
   children: React.ReactNode;
@@ -10,47 +11,28 @@ type AppLayoutProps = {
 export default async function AppLayout({ children }: AppLayoutProps) {
   const session = await requireSession({ redirectTo: "/" });
 
-  async function handleSignOut() {
-    "use server";
-
-    await signOut({
-      redirectTo: "/",
-    });
+  // Si no tiene organización activa, redirigir a onboarding
+  const activeOrg = await getActiveOrganization(session.user.id);
+  if (!activeOrg) {
+    redirect("/onboarding/organization");
   }
 
+  // Obtener todas las organizaciones del usuario para el selector
+  const organizations = await getUserOrganizations(session.user.id);
+
   return (
-    <div className="flex min-h-screen flex-col bg-slate-100">
-      <header className="border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-4">
-          <Link
-            href="/dashboard"
-            className="text-lg font-semibold text-slate-900 transition hover:text-blue-600"
-          >
-            COBRA
-          </Link>
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-slate-600">
-              <p className="font-medium text-slate-900">
-                {session.organization?.name ?? "Organización"}
-              </p>
-              <p className="text-xs text-slate-500">
-                {session.user.email ?? session.user.name ?? "Usuario"}
-              </p>
-            </div>
-            <form action={handleSignOut}>
-              <button
-                type="submit"
-                className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-800"
-              >
-                Cerrar sesión
-              </button>
-            </form>
-          </div>
-        </div>
-      </header>
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-6 py-10">
-        {children}
-      </main>
+    <div className="flex min-h-screen bg-background">
+      <AppSidebar />
+      <div className="flex flex-1 flex-col">
+        <AppHeader
+          user={session.user}
+          organization={session.organization}
+          organizations={organizations}
+        />
+        <main className="flex-1 overflow-y-auto p-6">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
