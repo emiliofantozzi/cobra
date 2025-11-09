@@ -13,6 +13,11 @@ export interface ListInvoicesParams {
   customerCompanyId?: CustomerCompanyId;
   status?: InvoiceStatus[];
   search?: string;
+  expectedPaymentDateFrom?: Date;
+  expectedPaymentDateTo?: Date;
+  nextActionAtFrom?: Date;
+  nextActionAtTo?: Date;
+  dateOrigin?: string;
   pagination?: PaginationParams;
 }
 
@@ -26,6 +31,15 @@ export interface InvoiceRepository {
     patch: Partial<Omit<InvoiceDraft, "organizationId" | "customerCompanyId">>,
   ): Promise<Invoice>;
   setStatus(context: RepositoryContext, id: InvoiceId, status: InvoiceStatus): Promise<Invoice>;
+  findByExpectedPaymentDate(context: RepositoryContext, from: Date, to: Date): Promise<Invoice[]>;
+  findByNextAction(context: RepositoryContext, from: Date, to: Date): Promise<Invoice[]>;
+  updateExpectedPaymentDate(
+    context: RepositoryContext,
+    id: InvoiceId,
+    expectedPaymentDate: Date | null,
+    dateOrigin: string | null,
+    changedBy?: string
+  ): Promise<Invoice>;
 }
 
 function mapPrismaToDomain(prismaModel: {
@@ -88,6 +102,30 @@ export function createInvoiceRepository(): InvoiceRepository {
 
       if (params?.status && params.status.length > 0) {
         where.status = { in: params.status };
+      }
+
+      if (params?.expectedPaymentDateFrom || params?.expectedPaymentDateTo) {
+        where.expectedPaymentDate = {};
+        if (params.expectedPaymentDateFrom) {
+          where.expectedPaymentDate.gte = params.expectedPaymentDateFrom;
+        }
+        if (params.expectedPaymentDateTo) {
+          where.expectedPaymentDate.lte = params.expectedPaymentDateTo;
+        }
+      }
+
+      if (params?.nextActionAtFrom || params?.nextActionAtTo) {
+        where.nextActionAt = {};
+        if (params.nextActionAtFrom) {
+          where.nextActionAt.gte = params.nextActionAtFrom;
+        }
+        if (params.nextActionAtTo) {
+          where.nextActionAt.lte = params.nextActionAtTo;
+        }
+      }
+
+      if (params?.dateOrigin) {
+        where.dateOrigin = params.dateOrigin;
       }
 
       if (params?.search) {
@@ -166,6 +204,72 @@ export function createInvoiceRepository(): InvoiceRepository {
         },
         data: { status },
       });
+      return mapPrismaToDomain(result);
+    },
+
+    async findByExpectedPaymentDate(context, from, to) {
+      const results = await prisma.invoice.findMany({
+        where: {
+          organizationId: context.organizationId,
+          expectedPaymentDate: {
+            gte: from,
+            lte: to,
+          },
+        },
+        orderBy: { expectedPaymentDate: 'asc' },
+      });
+      return results.map(mapPrismaToDomain);
+    },
+
+    async findByNextAction(context, from, to) {
+      const results = await prisma.invoice.findMany({
+        where: {
+          organizationId: context.organizationId,
+          nextActionAt: {
+            gte: from,
+            lte: to,
+          },
+        },
+        orderBy: { nextActionAt: 'asc' },
+      });
+      return results.map(mapPrismaToDomain);
+    },
+
+    async updateExpectedPaymentDate(context, id, expectedPaymentDate, dateOrigin, changedBy) {
+      // Get current invoice to track date change
+      const currentInvoice = await prisma.invoice.findFirst({
+        where: {
+          id,
+          organizationId: context.organizationId,
+        },
+        select: { expectedPaymentDate: true },
+      });
+
+      // Update invoice
+      const result = await prisma.invoice.update({
+        where: {
+          id,
+          organizationId: context.organizationId,
+        },
+        data: {
+          expectedPaymentDate,
+          dateOrigin: dateOrigin as any,
+        },
+      });
+
+      // Record date change history if date changed
+      if (currentInvoice && currentInvoice.expectedPaymentDate !== expectedPaymentDate) {
+        await prisma.invoiceDateHistory.create({
+          data: {
+            invoiceId: id,
+            previousDate: currentInvoice.expectedPaymentDate,
+            newDate: expectedPaymentDate,
+            changedBy: changedBy ?? null,
+            reason: `Updated via ${dateOrigin ?? 'manual'}`,
+          },
+        });
+      }
+
       return mapPrismaToDomain(result);
     },
   };

@@ -30,6 +30,12 @@ model Organization {
   agentConfig        AgentConfig?
   activeUsers        User[]                 @relation("ActiveOrganization")
   organizationCreationIdempotency OrganizationCreationIdempotency[]
+  segments           Segment[]
+  featureFlags       FeatureFlag[]
+  auditLogs          AuditLog[]
+  messageTemplates   MessageTemplate[]
+  playbooks          Playbook[]
+  savedViews         SavedView[]
 
   @@index([normalizedName])
 }
@@ -172,6 +178,11 @@ model Contact {
   position           String?
   notes              String?
   isPrimary          Boolean                @default(false)
+  language           String?
+  timezone           String?
+  workingHoursWindow Json?
+  hasOptedOut        Boolean                @default(false)
+  consentDate        DateTime?
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
 
@@ -183,6 +194,7 @@ model Contact {
   @@index([organizationId])
   @@index([customerCompanyId])
   @@index([email])
+  @@index([hasOptedOut])
   @@map("contacts")
 }
 
@@ -199,6 +211,12 @@ model Invoice {
   status             InvoiceStatus     @default(PENDING)
   notes              String?
   metadata           Json?
+  expectedPaymentDate DateTime?
+  dateOrigin          DateOrigin?
+  paymentPromiseDate  DateTime?
+  nextActionAt        DateTime?
+  lastChannel         CommunicationChannel?
+  lastResult          String?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -207,10 +225,14 @@ model Invoice {
   installments       Installment[]
   payments           Payment[]
   collectionCase     CollectionCase?
+  dateHistory        InvoiceDateHistory[]
 
   @@index([organizationId])
   @@index([customerCompanyId])
   @@index([status])
+  @@index([expectedPaymentDate])
+  @@index([nextActionAt])
+  @@index([dateOrigin])
   @@unique([organizationId, number], map: "invoice_number_per_org")
   @@map("invoices")
 }
@@ -222,6 +244,12 @@ enum InvoiceStatus {
   PAID
   OVERDUE
   CANCELLED
+}
+
+enum DateOrigin {
+  LOADED
+  REQUESTED_BY_AGENT
+  CONFIRMED_BY_CLIENT
 }
 
 model Installment {
@@ -468,6 +496,139 @@ enum AgentActionStatus {
   IN_PROGRESS
   SUCCEEDED
   FAILED
+}
+
+model InvoiceDateHistory {
+  id           String      @id @default(cuid())
+  invoiceId    String
+  previousDate DateTime?
+  newDate      DateTime?
+  reason       String?
+  changedBy    String?
+  createdAt    DateTime    @default(now())
+
+  invoice      Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_date_history")
+}
+
+model Segment {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  rulesJson      Json
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([isActive])
+  @@map("segments")
+}
+
+model FeatureFlag {
+  id             String   @id @default(cuid())
+  organizationId String
+  flagKey        String
+  enabled        Boolean  @default(false)
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, flagKey])
+  @@index([organizationId])
+  @@index([flagKey])
+  @@map("feature_flags")
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  entityType     String
+  entityId       String
+  action         String
+  changes        Json?
+  actor          String?
+  actorId        String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model MessageTemplate {
+  id             String               @id @default(cuid())
+  organizationId String
+  key            String
+  name           String
+  description    String?
+  channel        CommunicationChannel
+  subject        String?
+  body           String
+  variables      Json?
+  isActive       Boolean              @default(true)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+  @@index([channel])
+  @@index([isActive])
+  @@map("message_templates")
+}
+
+model Playbook {
+  id             String   @id @default(cuid())
+  organizationId String
+  key            String
+  name           String
+  description    String?
+  config         Json
+  isActive       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+  @@index([isActive])
+  @@map("playbooks")
+}
+
+model SavedView {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  name           String
+  description    String?
+  viewType       String
+  filters        Json
+  isShared       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([viewType])
+  @@map("saved_views")
 }
 
 model OrganizationCreationIdempotency {

@@ -268,11 +268,27 @@ El modelo de datos está completamente definido en `prisma/schema.prisma` y apli
 - **Contact**: Personas de contacto dentro de cada empresa cliente.
   - Canales: email, phoneNumber, whatsappNumber.
   - Soporta contacto primario (`isPrimary`).
+  - **Campos extendidos (Phase 2)**:
+    - `language`: Idioma preferido para comunicaciones.
+    - `timezone`: Zona horaria del contacto.
+    - `workingHoursWindow`: Ventana horaria preferida (JSON: {start, end, days}).
+    - `hasOptedOut`: Indicador de opt-out para no contactar (default: false).
+    - `consentDate`: Fecha de consentimiento para comunicaciones.
 
 #### Facturación y pagos
 - **Invoice**: Facturas emitidas a empresas clientes.
   - Estados: `DRAFT`, `PENDING`, `PARTIALLY_PAID`, `PAID`, `OVERDUE`, `CANCELLED`.
   - Campos: número, descripción, fechas (emisión/vencimiento), monto, moneda, notas, metadata.
+  - **Campos extendidos (Phase 2)**:
+    - `expectedPaymentDate`: Fecha esperada de pago (nullable).
+    - `dateOrigin`: Origen de la fecha esperada (`DateOrigin` enum: `LOADED`, `REQUESTED_BY_AGENT`, `CONFIRMED_BY_CLIENT`).
+    - `paymentPromiseDate`: Fecha de promesa de pago del cliente.
+    - `nextActionAt`: Próxima acción programada para esta factura.
+    - `lastChannel`: Último canal de comunicación usado (`CommunicationChannel`).
+    - `lastResult`: Resultado de la última comunicación (texto libre).
+- **InvoiceDateHistory**: Historial de cambios de fechas esperadas de pago (auditoría).
+  - Campos: invoiceId, previousDate, newDate, reason, changedBy, createdAt.
+  - Permite rastrear todos los cambios de `expectedPaymentDate` con su origen y razón.
 - **Installment**: Cuotas de pago asociadas a una factura.
   - Estados: `PENDING`, `PAID`, `OVERDUE`, `CANCELLED`.
   - Campos: secuencia, fecha de vencimiento, monto, monto pagado, fecha de pago.
@@ -303,6 +319,29 @@ El modelo de datos está completamente definido en `prisma/schema.prisma` y apli
   - Estados (`status`): `PENDING`, `IN_PROGRESS`, `SUCCEEDED`, `FAILED`.
   - Campos: resumen, payload, error.
 
+#### Configuración y gestión del agente (Phase 2)
+- **MessageTemplate**: Plantillas de mensajes para el agente de cobranza.
+  - Campos: organizationId, key (único por org), name, description, channel (`CommunicationChannel`), subject, body, variables (JSON), isActive.
+  - Permite definir plantillas reutilizables para email y WhatsApp con variables dinámicas.
+- **Playbook**: Secuencias de cobranza predefinidas (playbooks).
+  - Campos: organizationId, key (único por org), name, description, config (JSON con stages, delays, templates), isActive.
+  - Define flujos completos de cobranza con múltiples etapas y reglas de timing.
+- **Segment**: Segmentación de facturas por reglas personalizadas.
+  - Campos: organizationId, name, description, rulesJson (JSON con condiciones), isActive.
+  - Permite crear segmentos dinámicos de facturas basados en criterios (ej: ">30 días mora y saldo>$1000").
+
+#### Sistema y auditoría (Phase 2)
+- **FeatureFlag**: Feature flags por organización.
+  - Campos: organizationId, flagKey (único por org), enabled, metadata (JSON).
+  - Permite habilitar/deshabilitar features por organización sin deploy.
+- **AuditLog**: Log de auditoría de cambios críticos.
+  - Campos: organizationId, entityType, entityId, action, changes (JSON), actor, actorId, ipAddress, userAgent, createdAt.
+  - Índices en entityType, entityId, createdAt para búsquedas rápidas.
+  - Rastrea cambios en entidades importantes con contexto completo.
+- **SavedView**: Vistas guardadas para el módulo de Seguimiento.
+  - Campos: organizationId, userId (opcional), name, description, viewType, filters (JSON), isShared.
+  - Permite guardar filtros y vistas personalizadas para el seguimiento de cobranzas.
+
 ### 6.2. Relaciones principales
 
 - `Organization` 1–N `CustomerCompany`
@@ -311,17 +350,25 @@ El modelo de datos está completamente definido en `prisma/schema.prisma` y apli
 - `Invoice` 1–N `Installment`
 - `Invoice` 1–N `Payment`
 - `Invoice` 1–1 `CollectionCase`
+- `Invoice` 1–N `InvoiceDateHistory` (auditoría de fechas)
 - `CollectionCase` 1–N `CommunicationAttempt`
 - `CollectionCase` 1–N `AgentRun`
 - `CollectionCase` 1–N `AgentActionLog`
 - `Contact` 1–N `CollectionCase` (como contacto primario)
 - `Organization` 1–1 `AgentConfig`
+- `Organization` 1–N `Segment`
+- `Organization` 1–N `FeatureFlag`
+- `Organization` 1–N `AuditLog`
+- `Organization` 1–N `MessageTemplate`
+- `Organization` 1–N `Playbook`
+- `Organization` 1–N `SavedView`
 
 ### 6.3. Enumeraciones clave
 
 Las enumeraciones reflejan el workflow de cobranzas y del agente:
 
 - **InvoiceStatus**: Estados de facturación (`DRAFT`, `PENDING`, `PARTIALLY_PAID`, `PAID`, `OVERDUE`, `CANCELLED`).
+- **DateOrigin** (Phase 2): Origen de la fecha esperada de pago (`LOADED`, `REQUESTED_BY_AGENT`, `CONFIRMED_BY_CLIENT`).
 - **CollectionStage**: Etapas del proceso de cobranza (`INITIAL`, `REMINDER_1`, `REMINDER_2`, `ESCALATED`, `PROMISE_TO_PAY`, `RESOLVED`, `MANUAL_REVIEW`).
 - **CollectionCaseStatus**: Estado operativo del caso (`ACTIVE`, `PAUSED`, `CLOSED`).
 - **CollectionRiskLevel**: Nivel de riesgo (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).

@@ -5,6 +5,7 @@ import type { PaginationParams, PaginatedResult, RepositoryContext } from "./typ
 export interface ListContactsParams {
   customerCompanyId?: CustomerCompanyId;
   search?: string;
+  hasOptedOut?: boolean;
   pagination?: PaginationParams;
 }
 
@@ -18,6 +19,8 @@ export interface ContactRepository {
     patch: Partial<Omit<ContactDraft, "organizationId" | "customerCompanyId">>,
   ): Promise<Contact>;
   delete(context: RepositoryContext, id: ContactId): Promise<void>;
+  findActiveContacts(context: RepositoryContext, customerCompanyId?: CustomerCompanyId): Promise<Contact[]>;
+  updateOptOutStatus(context: RepositoryContext, id: ContactId, hasOptedOut: boolean): Promise<Contact>;
 }
 
 function mapPrismaToDomain(prismaModel: {
@@ -74,6 +77,10 @@ export function createContactRepository(): ContactRepository {
 
       if (params?.customerCompanyId) {
         where.customerCompanyId = params.customerCompanyId;
+      }
+
+      if (params?.hasOptedOut !== undefined) {
+        where.hasOptedOut = params.hasOptedOut;
       }
 
       if (params?.search) {
@@ -152,6 +159,38 @@ export function createContactRepository(): ContactRepository {
           organizationId: context.organizationId,
         },
       });
+    },
+
+    async findActiveContacts(context, customerCompanyId) {
+      const where: any = {
+        organizationId: context.organizationId,
+        hasOptedOut: false,
+      };
+
+      if (customerCompanyId) {
+        where.customerCompanyId = customerCompanyId;
+      }
+
+      const results = await prisma.contact.findMany({
+        where,
+        orderBy: { isPrimary: 'desc' },
+      });
+
+      return results.map(mapPrismaToDomain);
+    },
+
+    async updateOptOutStatus(context, id, hasOptedOut) {
+      const result = await prisma.contact.update({
+        where: {
+          id,
+          organizationId: context.organizationId,
+        },
+        data: {
+          hasOptedOut,
+          consentDate: hasOptedOut ? null : new Date(),
+        },
+      });
+      return mapPrismaToDomain(result);
     },
   };
 }
