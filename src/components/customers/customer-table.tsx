@@ -66,7 +66,7 @@ export function CustomerTable({ customers }: CustomerTableProps) {
                   {customer.industry || "-"}
                 </TableCell>
                 <TableCell className="text-right">
-                  <Link href={`/customers/${customer.id}`}>
+                  <Link href={`/portfolio/companies/${customer.id}`}>
                     <Button variant="ghost" size="sm">
                       Ver <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
