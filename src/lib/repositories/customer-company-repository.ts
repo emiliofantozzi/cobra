@@ -12,11 +12,23 @@ export interface ListCustomerCompaniesParams {
   status?: CustomerCompanyStatus[];
   search?: string;
   pagination?: PaginationParams;
+  sortBy?: "name" | "createdAt";
+  sortDirection?: "asc" | "desc";
 }
 
 export interface CustomerCompanyRepository {
   findById(context: RepositoryContext, id: CustomerCompanyId): Promise<CustomerCompany | null>;
-  list(context: RepositoryContext, params?: ListCustomerCompaniesParams): Promise<PaginatedResult<CustomerCompany>>;
+  findByTaxId(context: RepositoryContext, taxId: string): Promise<CustomerCompany | null>;
+  list(
+    context: RepositoryContext,
+    params?: ListCustomerCompaniesParams,
+  ): Promise<PaginatedResult<CustomerCompany & { contactsCount: number; invoicesCount: number }>>;
+  searchByName(context: RepositoryContext, search: string, limit?: number): Promise<CustomerCompany[]>;
+  countByStatus(context: RepositoryContext, status?: CustomerCompanyStatus[]): Promise<number>;
+  findWithRelations(
+    context: RepositoryContext,
+    id: CustomerCompanyId,
+  ): Promise<(CustomerCompany & { contactsCount: number; invoicesCount: number; totalPendingAmount: number }) | null>;
   create(context: RepositoryContext, data: CustomerCompanyCreateData): Promise<CustomerCompany>;
   update(
     context: RepositoryContext,
@@ -24,6 +36,8 @@ export interface CustomerCompanyRepository {
     patch: Partial<Omit<CustomerCompanyDraft, "organizationId">>,
   ): Promise<CustomerCompany>;
   archive(context: RepositoryContext, id: CustomerCompanyId): Promise<CustomerCompany>;
+  reactivate(context: RepositoryContext, id: CustomerCompanyId): Promise<CustomerCompany>;
+  bulkArchive(context: RepositoryContext, ids: CustomerCompanyId[]): Promise<number>;
 }
 
 function mapPrismaToDomain(prismaModel: {
@@ -68,9 +82,88 @@ export function createCustomerCompanyRepository(): CustomerCompanyRepository {
       return result ? mapPrismaToDomain(result) : null;
     },
 
+    async findByTaxId(context, taxId) {
+      if (!taxId) return null;
+      const result = await prisma.customerCompany.findFirst({
+        where: {
+          taxId,
+          organizationId: context.organizationId,
+        },
+      });
+      return result ? mapPrismaToDomain(result) : null;
+    },
+
+    async searchByName(context, search, limit = 100) {
+      const results = await prisma.customerCompany.findMany({
+        where: {
+          organizationId: context.organizationId,
+          OR: [
+            { name: { contains: search, mode: "insensitive" } },
+            { legalName: { contains: search, mode: "insensitive" } },
+            { taxId: { contains: search, mode: "insensitive" } },
+          ],
+        },
+        take: limit,
+        orderBy: { name: "asc" },
+      });
+      return results.map(mapPrismaToDomain);
+    },
+
+    async countByStatus(context, status) {
+      const where: any = {
+        organizationId: context.organizationId,
+      };
+      if (status && status.length > 0) {
+        where.status = { in: status };
+      }
+      return prisma.customerCompany.count({ where });
+    },
+
+    async findWithRelations(context, id) {
+      const result = await prisma.customerCompany.findFirst({
+        where: {
+          id,
+          organizationId: context.organizationId,
+        },
+        include: {
+          _count: {
+            select: {
+              contacts: true,
+              invoices: true,
+            },
+          },
+          invoices: {
+            where: {
+              status: {
+                in: ["PENDING", "OVERDUE", "PARTIALLY_PAID"],
+              },
+            },
+            select: {
+              amount: true,
+            },
+          },
+        },
+      });
+
+      if (!result) return null;
+
+      const totalPendingAmount = result.invoices.reduce((sum, inv) => {
+        return sum + Number(inv.amount);
+      }, 0);
+
+      return {
+        ...mapPrismaToDomain(result),
+        contactsCount: result._count.contacts,
+        invoicesCount: result._count.invoices,
+        totalPendingAmount,
+      };
+    },
+
     async list(context, params) {
       const limit = params?.pagination?.limit ?? 50;
       const cursor = params?.pagination?.cursor;
+      const sortBy = params?.sortBy ?? "createdAt";
+      const sortDirection = params?.sortDirection ?? "desc";
 
       const where: any = {
         organizationId: context.organizationId,
@@ -80,20 +173,31 @@ export function createCustomerCompanyRepository(): CustomerCompanyRepository {
         where.status = { in: params.status };
       }
 
-      if (params?.search) {
+      if (params?.search && params.search.trim().length > 0) {
         where.OR = [
-          { name: { contains: params.search, mode: "insensitive" } },
-          { legalName: { contains: params.search, mode: "insensitive" } },
-          { taxId: { contains: params.search, mode: "insensitive" } },
+          { name: { contains: params.search.trim(), mode: "insensitive" } },
+          { legalName: { contains: params.search.trim(), mode: "insensitive" } },
+          { taxId: { contains: params.search.trim(), mode: "insensitive" } },
         ];
       }
+
+      const orderBy: any = {};
+      orderBy[sortBy] = sortDirection;
 
       const [data, totalCount] = await Promise.all([
         prisma.customerCompany.findMany({
           where,
           take: limit + 1,
           cursor: cursor ? { id: cursor } : undefined,
-          orderBy: { createdAt: "desc" },
+          orderBy,
+          include: {
+            _count: {
+              select: {
+                contacts: true,
+                invoices: true,
+              },
+            },
+          },
         }),
         prisma.customerCompany.count({ where }),
       ]);
@@ -103,7 +207,11 @@ export function createCustomerCompanyRepository(): CustomerCompanyRepository {
       const nextCursor = hasNextPage && items.length > 0 ? items[items.length - 1]!.id : null;
 
       return {
-        data: items.map(mapPrismaToDomain),
+        data: items.map((item) => ({
+          ...mapPrismaToDomain(item),
+          contactsCount: item._count.contacts,
+          invoicesCount: item._count.invoices,
+        })),
         nextCursor,
         totalCount,
       };
@@ -165,6 +273,34 @@ export function createCustomerCompanyRepository(): CustomerCompanyRepository {
         },
       });
       return mapPrismaToDomain(result);
+    },
+
+    async reactivate(context, id) {
+      const result = await prisma.customerCompany.update({
+        where: {
+          id,
+          organizationId: context.organizationId,
+        },
+        data: {
+          status: "ACTIVE",
+          archivedAt: null,
+        },
+      });
+      return mapPrismaToDomain(result);
+    },
+
+    async bulkArchive(context, ids) {
+      const result = await prisma.customerCompany.updateMany({
+        where: {
+          id: { in: ids },
+          organizationId: context.organizationId,
+        },
+        data: {
+          status: "ARCHIVED",
+          archivedAt: new Date(),
+        },
+      });
+      return result.count;
     },
   };
 }

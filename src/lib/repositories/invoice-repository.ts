@@ -6,6 +6,7 @@ import type {
   InvoiceCreateData,
   CustomerCompanyId,
 } from "../domain";
+import type { InvoiceWithCompany } from "../types/invoice-extended";
 import { prisma } from "../db";
 import type { PaginatedResult, PaginationParams, RepositoryContext } from "./types";
 
@@ -23,7 +24,7 @@ export interface ListInvoicesParams {
 
 export interface InvoiceRepository {
   findById(context: RepositoryContext, id: InvoiceId): Promise<Invoice | null>;
-  list(context: RepositoryContext, params?: ListInvoicesParams): Promise<PaginatedResult<Invoice>>;
+  list(context: RepositoryContext, params?: ListInvoicesParams): Promise<PaginatedResult<InvoiceWithCompany>>;
   create(context: RepositoryContext, data: InvoiceCreateData): Promise<Invoice>;
   update(
     context: RepositoryContext,
@@ -40,6 +41,15 @@ export interface InvoiceRepository {
     dateOrigin: string | null,
     changedBy?: string
   ): Promise<Invoice>;
+  findByNumber(context: RepositoryContext, number: string): Promise<Invoice | null>;
+  findWithoutExpectedDate(context: RepositoryContext): Promise<Invoice[]>;
+  findDueDateToday(context: RepositoryContext, today: Date): Promise<Invoice[]>;
+  findOverdue(context: RepositoryContext, today: Date): Promise<Invoice[]>;
+  findWithPromiseToday(context: RepositoryContext, today: Date): Promise<Invoice[]>;
+  findWithPromiseMissed(context: RepositoryContext, today: Date): Promise<Invoice[]>;
+  searchByNumberOrCompany(context: RepositoryContext, query: string, limit?: number): Promise<Invoice[]>;
+  countByFilters(context: RepositoryContext, filters: Partial<ListInvoicesParams>): Promise<number>;
+  findWithRelations(context: RepositoryContext, id: InvoiceId): Promise<Invoice | null>;
 }
 
 function mapPrismaToDomain(prismaModel: {
@@ -55,6 +65,12 @@ function mapPrismaToDomain(prismaModel: {
   status: string;
   notes: string | null;
   metadata: any;
+  expectedPaymentDate: Date | null;
+  dateOrigin: string | null;
+  paymentPromiseDate: Date | null;
+  nextActionAt: Date | null;
+  lastChannel: string | null;
+  lastResult: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): Invoice {
@@ -71,6 +87,12 @@ function mapPrismaToDomain(prismaModel: {
     status: prismaModel.status as InvoiceStatus,
     notes: prismaModel.notes ?? undefined,
     metadata: prismaModel.metadata ?? undefined,
+    expectedPaymentDate: prismaModel.expectedPaymentDate ?? undefined,
+    dateOrigin: (prismaModel.dateOrigin as any) ?? undefined,
+    paymentPromiseDate: prismaModel.paymentPromiseDate ?? undefined,
+    nextActionAt: prismaModel.nextActionAt ?? undefined,
+    lastChannel: (prismaModel.lastChannel as any) ?? undefined,
+    lastResult: prismaModel.lastResult ?? undefined,
     createdAt: prismaModel.createdAt,
     updatedAt: prismaModel.updatedAt,
   };
@@ -132,6 +154,11 @@ export function createInvoiceRepository(): InvoiceRepository {
         where.OR = [
           { number: { contains: params.search, mode: "insensitive" } },
           { description: { contains: params.search, mode: "insensitive" } },
+          {
+            customerCompany: {
+              name: { contains: params.search, mode: "insensitive" },
+            },
+          },
         ];
       }
 
@@ -140,7 +167,16 @@ export function createInvoiceRepository(): InvoiceRepository {
           where,
           take: limit + 1,
           cursor: cursor ? { id: cursor } : undefined,
-          orderBy: { createdAt: "desc" },
+          orderBy: { dueDate: "asc" },
+          include: {
+            customerCompany: {
+              select: {
+                id: true,
+                name: true,
+                legalName: true,
+              },
+            },
+          },
         }),
         prisma.invoice.count({ where }),
       ]);
@@ -150,7 +186,14 @@ export function createInvoiceRepository(): InvoiceRepository {
       const nextCursor = hasNextPage && items.length > 0 ? items[items.length - 1]!.id : null;
 
       return {
-        data: items.map(mapPrismaToDomain),
+        data: items.map((item) => ({
+          ...mapPrismaToDomain(item),
+          customerCompany: item.customerCompany ? {
+            id: item.customerCompany.id,
+            name: item.customerCompany.name,
+            legalName: item.customerCompany.legalName ?? undefined,
+          } : undefined,
+        })),
         nextCursor,
         totalCount,
       };
@@ -170,6 +213,12 @@ export function createInvoiceRepository(): InvoiceRepository {
           status: data.status,
           notes: data.notes,
           metadata: data.metadata as any,
+          expectedPaymentDate: data.expectedPaymentDate,
+          dateOrigin: data.dateOrigin as any,
+          paymentPromiseDate: data.paymentPromiseDate,
+          nextActionAt: data.nextActionAt,
+          lastChannel: data.lastChannel as any,
+          lastResult: data.lastResult,
         },
       });
       return mapPrismaToDomain(result);
@@ -185,6 +234,12 @@ export function createInvoiceRepository(): InvoiceRepository {
       if (patch.currency !== undefined) updateData.currency = patch.currency;
       if (patch.notes !== undefined) updateData.notes = patch.notes;
       if (patch.metadata !== undefined) updateData.metadata = patch.metadata as any;
+      if (patch.expectedPaymentDate !== undefined) updateData.expectedPaymentDate = patch.expectedPaymentDate;
+      if (patch.dateOrigin !== undefined) updateData.dateOrigin = patch.dateOrigin as any;
+      if (patch.paymentPromiseDate !== undefined) updateData.paymentPromiseDate = patch.paymentPromiseDate;
+      if (patch.nextActionAt !== undefined) updateData.nextActionAt = patch.nextActionAt;
+      if (patch.lastChannel !== undefined) updateData.lastChannel = patch.lastChannel as any;
+      if (patch.lastResult !== undefined) updateData.lastResult = patch.lastResult;
 
       const result = await prisma.invoice.update({
         where: {
@@ -271,6 +326,190 @@ export function createInvoiceRepository(): InvoiceRepository {
       }
 
       return mapPrismaToDomain(result);
+    },
+
+    async findByNumber(context, number) {
+      const result = await prisma.invoice.findFirst({
+        where: {
+          organizationId: context.organizationId,
+          number,
+        },
+      });
+      return result ? mapPrismaToDomain(result) : null;
+    },
+
+    async findWithoutExpectedDate(context) {
+      const results = await prisma.invoice.findMany({
+        where: {
+          organizationId: context.organizationId,
+          expectedPaymentDate: null,
+          status: { notIn: ["PAID", "CANCELLED"] },
+        },
+        orderBy: { dueDate: "asc" },
+      });
+      return results.map(mapPrismaToDomain);
+    },
+
+    async findDueDateToday(context, today) {
+      const startOfDay = new Date(today);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(today);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const results = await prisma.invoice.findMany({
+        where: {
+          organizationId: context.organizationId,
+          dueDate: {
+            gte: startOfDay,
+            lte: endOfDay,
+          },
+          status: { notIn: ["PAID", "CANCELLED"] },
+        },
+        orderBy: { dueDate: "asc" },
+      });
+      return results.map(mapPrismaToDomain);
+    },
+
+    async findOverdue(context, today) {
+      const results = await prisma.invoice.findMany({
+        where: {
+          organizationId: context.organizationId,
+          dueDate: { lt: today },
+          status: { notIn: ["PAID", "CANCELLED"] },
+        },
+        orderBy: { dueDate: "asc" },
+      });
+      return results.map(mapPrismaToDomain);
+    },
+
+    async findWithPromiseToday(context, today) {
+      const startOfDay = new Date(today);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(today);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const results = await prisma.invoice.findMany({
+        where: {
+          organizationId: context.organizationId,
+          paymentPromiseDate: {
+            gte: startOfDay,
+            lte: endOfDay,
+          },
+          status: { notIn: ["PAID", "CANCELLED"] },
+        },
+        orderBy: { paymentPromiseDate: "asc" },
+      });
+      return results.map(mapPrismaToDomain);
+    },
+
+    async findWithPromiseMissed(context, today) {
+      const results = await prisma.invoice.findMany({
+        where: {
+          organizationId: context.organizationId,
+          paymentPromiseDate: { lt: today },
+          status: { notIn: ["PAID", "CANCELLED"] },
+        },
+        orderBy: { paymentPromiseDate: "asc" },
+      });
+      return results.map(mapPrismaToDomain);
+    },
+
+    async searchByNumberOrCompany(context, query, limit = 100) {
+      const results = await prisma.invoice.findMany({
+        where: {
+          organizationId: context.organizationId,
+          OR: [
+            { number: { contains: query, mode: "insensitive" } },
+            {
+              customerCompany: {
+                name: { contains: query, mode: "insensitive" },
+              },
+            },
+          ],
+        },
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: {
+          customerCompany: {
+            select: { name: true },
+          },
+        },
+      });
+      return results.map(mapPrismaToDomain);
+    },
+
+    async countByFilters(context, filters) {
+      const where: any = {
+        organizationId: context.organizationId,
+      };
+
+      if (filters.customerCompanyId) {
+        where.customerCompanyId = filters.customerCompanyId;
+      }
+
+      if (filters.status && filters.status.length > 0) {
+        where.status = { in: filters.status };
+      }
+
+      if (filters.expectedPaymentDateFrom || filters.expectedPaymentDateTo) {
+        where.expectedPaymentDate = {};
+        if (filters.expectedPaymentDateFrom) {
+          where.expectedPaymentDate.gte = filters.expectedPaymentDateFrom;
+        }
+        if (filters.expectedPaymentDateTo) {
+          where.expectedPaymentDate.lte = filters.expectedPaymentDateTo;
+        }
+      }
+
+      if (filters.nextActionAtFrom || filters.nextActionAtTo) {
+        where.nextActionAt = {};
+        if (filters.nextActionAtFrom) {
+          where.nextActionAt.gte = filters.nextActionAtFrom;
+        }
+        if (filters.nextActionAtTo) {
+          where.nextActionAt.lte = filters.nextActionAtTo;
+        }
+      }
+
+      if (filters.dateOrigin) {
+        where.dateOrigin = filters.dateOrigin;
+      }
+
+      if (filters.search) {
+        where.OR = [
+          { number: { contains: filters.search, mode: "insensitive" } },
+          { description: { contains: filters.search, mode: "insensitive" } },
+          {
+            customerCompany: {
+              name: { contains: filters.search, mode: "insensitive" },
+            },
+          },
+        ];
+      }
+
+      return prisma.invoice.count({ where });
+    },
+
+    async findWithRelations(context, id) {
+      const result = await prisma.invoice.findFirst({
+        where: {
+          id,
+          organizationId: context.organizationId,
+        },
+        include: {
+          customerCompany: {
+            select: {
+              id: true,
+              name: true,
+              legalName: true,
+            },
+          },
+          dateHistory: {
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      });
+      return result ? mapPrismaToDomain(result) : null;
     },
   };
 }

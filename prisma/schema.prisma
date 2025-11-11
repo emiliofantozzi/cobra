@@ -183,6 +183,15 @@ model Contact {
   workingHoursWindow Json?
   hasOptedOut        Boolean                @default(false)
   consentDate        DateTime?
+  role               ContactRole?
+  preferredChannel   CommunicationChannel?
+  emailStatus        EmailStatus            @default(UNKNOWN)
+  whatsappStatus     WhatsAppStatus         @default(NOT_VALIDATED)
+  isBillingContact   Boolean                @default(false)
+  optedOutEmail      Boolean                @default(false)
+  optedOutEmailAt    DateTime?
+  optedOutWhatsapp   Boolean                @default(false)
+  optedOutWhatsappAt DateTime?
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
 
@@ -195,6 +204,13 @@ model Contact {
   @@index([customerCompanyId])
   @@index([email])
   @@index([hasOptedOut])
+  @@index([role])
+  @@index([preferredChannel])
+  @@index([optedOutEmail])
+  @@index([optedOutWhatsapp])
+  @@index([isBillingContact])
+  @@index([organizationId, customerCompanyId, email])
+  @@index([organizationId, customerCompanyId, whatsappNumber])
   @@map("contacts")
 }
 
@@ -411,6 +427,26 @@ enum CommunicationChannel {
   SMS
   PHONE
   OTHER
+}
+
+enum ContactRole {
+  BILLING_AP
+  OPERATIONS
+  DECISION_MAKER
+  OTHER
+}
+
+enum EmailStatus {
+  DELIVERABLE
+  BOUNCE
+  UNKNOWN
+}
+
+enum WhatsAppStatus {
+  NOT_VALIDATED
+  VALIDATED
+  BLOCKED
+  UNKNOWN
 }
 
 enum CommunicationDirection {

@@ -7,7 +7,7 @@ import type {
   JsonValue,
 } from "../types";
 
-export type CommunicationChannel = "EMAIL" | "WHATSAPP" | "SMS" | "PHONE" | "OTHER";
+import type { CommunicationChannel } from "../types";
 export type CommunicationDirection = "OUTBOUND" | "INBOUND";
 export type CommunicationStatus = "DRAFT" | "PENDING" | "SENT" | "DELIVERED" | "FAILED" | "ACKNOWLEDGED";
 

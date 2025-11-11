@@ -11,6 +11,7 @@ export type AgentRunId = string;
 export type AgentActionLogId = string;
 
 export type CurrencyCode = string;
+export type CommunicationChannel = "EMAIL" | "WHATSAPP" | "SMS" | "PHONE" | "OTHER";
 
 export type JsonValue = unknown;
 

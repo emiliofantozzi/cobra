@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/services/session";
 import { getActiveOrganization, getUserOrganizations } from "@/lib/services/organizations";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
+import { AppLayoutClient } from "@/components/layout/app-layout-client";
 
 type AppLayoutProps = {
   children: React.ReactNode;
@@ -21,19 +22,21 @@ export default async function AppLayout({ children }: AppLayoutProps) {
   const organizations = await getUserOrganizations(session.user.id);
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <AppSidebar />
-      <div className="flex flex-1 flex-col">
-        <AppHeader
-          user={session.user}
-          organization={session.organization}
-          organizations={organizations}
-        />
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
-        </main>
+    <AppLayoutClient>
+      <div className="flex min-h-screen bg-background">
+        <AppSidebar />
+        <div className="flex flex-1 flex-col">
+          <AppHeader
+            user={session.user}
+            organization={session.organization}
+            organizations={organizations}
+          />
+          <main className="flex-1 overflow-y-auto p-6">
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </AppLayoutClient>
   );
 }
 

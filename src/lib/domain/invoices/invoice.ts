@@ -9,7 +9,10 @@ import type {
 import type { Installment } from "./installment";
 import type { Payment } from "./payment";
 
+import type { CommunicationChannel } from "../types";
+
 export type InvoiceStatus = "DRAFT" | "PENDING" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED";
+export type DateOrigin = "LOADED" | "REQUESTED_BY_AGENT" | "CONFIRMED_BY_CLIENT";
 
 export interface Invoice {
   id: InvoiceId;
@@ -24,6 +27,12 @@ export interface Invoice {
   status: InvoiceStatus;
   notes?: string;
   metadata?: JsonValue;
+  expectedPaymentDate?: Date;
+  dateOrigin?: DateOrigin;
+  paymentPromiseDate?: Date;
+  nextActionAt?: Date;
+  lastChannel?: CommunicationChannel;
+  lastResult?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,6 +49,12 @@ export interface InvoiceDraft {
   notes?: string;
   metadata?: JsonValue;
   status?: InvoiceStatus;
+  expectedPaymentDate?: Date;
+  dateOrigin?: DateOrigin;
+  paymentPromiseDate?: Date;
+  nextActionAt?: Date;
+  lastChannel?: CommunicationChannel;
+  lastResult?: string;
 }
 
 export function createInvoice(input: InvoiceDraft): Omit<Invoice, "id" | "createdAt" | "updatedAt"> {
@@ -61,6 +76,12 @@ export function createInvoice(input: InvoiceDraft): Omit<Invoice, "id" | "create
     status,
     notes: input.notes?.trim() || undefined,
     metadata: input.metadata,
+    expectedPaymentDate: input.expectedPaymentDate,
+    dateOrigin: input.dateOrigin,
+    paymentPromiseDate: input.paymentPromiseDate,
+    nextActionAt: input.nextActionAt,
+    lastChannel: input.lastChannel,
+    lastResult: input.lastResult,
   };
 }
 

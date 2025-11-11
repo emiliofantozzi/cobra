@@ -6,6 +6,23 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/config/env";
 import { getActiveOrganization } from "@/lib/services/organizations";
 
+// Validar que las variables críticas estén disponibles
+if (!env.AUTH_SECRET) {
+  throw new Error("AUTH_SECRET is required but not set");
+}
+if (!env.GOOGLE_CLIENT_ID) {
+  throw new Error("GOOGLE_CLIENT_ID is required but not set");
+}
+if (!env.GOOGLE_CLIENT_SECRET) {
+  throw new Error("GOOGLE_CLIENT_SECRET is required but not set");
+}
+if (!env.AUTH_URL) {
+  throw new Error("AUTH_URL is required but not set");
+}
+
+// Normalizar AUTH_URL (remover trailing slash)
+const normalizedAuthUrl = env.AUTH_URL.replace(/\/$/, "");
+
 export const {
   handlers,
   auth,
@@ -29,7 +46,7 @@ export const {
       // Esto asegura que siempre use https://app.hqhelios.com independientemente del dominio de acceso
       authorization: {
         params: {
-          redirect_uri: `${env.AUTH_URL.replace(/\/$/, "")}/api/auth/callback/google`,
+          redirect_uri: `${normalizedAuthUrl}/api/auth/callback/google`,
         },
       },
     }),
@@ -39,7 +56,7 @@ export const {
       // Si la URL es relativa, construir la URL completa
       // Usar baseUrl del request para mantener compatibilidad, pero si viene de OAuth callback,
       // forzar el uso de AUTH_URL para asegurar que siempre use app.hqhelios.com
-      const targetBaseUrl = env.AUTH_URL;
+      const targetBaseUrl = normalizedAuthUrl;
       
       if (url.startsWith("/")) {
         return `${targetBaseUrl}${url}`;

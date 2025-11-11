@@ -50,6 +50,18 @@ La plataforma es una aplicación SaaS multi-empresa que:
 - **Dominio**: Módulos de dominio con invariantes y reglas de negocio implementados.
 - **Repositorios**: Implementaciones Prisma completas para todas las entidades con filtrado multi-tenant.
 - **Servicios**: Servicios de aplicación creados para orquestar dominio y repositorios.
+
+### 2.3. Fase 3: Facturas (Cartera) completada ✅
+
+- **UI de Facturas**: Lista completa con columnas extendidas, filtros rápidos (chips), búsqueda y paginación server-side.
+- **CRUD completo**: Formulario crear/editar, edición inline de fecha esperada, bulk actions.
+- **Ficha 360°**: Drawer con tabs (Datos, Timeline, Historial) para visualización completa de facturas.
+- **Gestión de estados**: Diálogos para marcar como pagada, cancelar, registrar promesas de pago.
+- **Exportación**: Exportación CSV con filtros aplicados.
+- **Validaciones**: Validación de montos, monedas, fechas y transiciones de estado.
+- **Cálculos derivados**: Días de mora, próxima acción, estado de seguimiento.
+- **RBAC**: Permisos configurados para todas las acciones (crear, editar, marcar pagada, cancelar, etc.).
+- **Telemetría**: Eventos de Sentry instrumentados para todas las acciones principales.
 - **Migraciones**: Esquema aplicado a la base de datos Supabase.
 
 ### 2.3. Próximos pasos (Fase 3)
@@ -265,30 +277,47 @@ El modelo de datos está completamente definido en `prisma/schema.prisma` y apli
 - **CustomerCompany**: Empresas clientes de la organización usuaria.
   - Estados: `ACTIVE`, `INACTIVE`, `ARCHIVED`.
   - Campos: nombre, razón social, taxId, industria, website, notas.
+  - **Unicidad**: `taxId` debe ser único por organización (si presente). Se implementa mediante índice único parcial `customer_company_tax_id_per_org` que solo aplica cuando `taxId IS NOT NULL`.
 - **Contact**: Personas de contacto dentro de cada empresa cliente.
   - Canales: email, phoneNumber, whatsappNumber.
-  - Soporta contacto primario (`isPrimary`).
+  - **Rol del contacto** (`role`): BILLING_AP, OPERATIONS, DECISION_MAKER, OTHER.
+  - **Canal preferido** (`preferredChannel`): EMAIL, WHATSAPP, SMS, PHONE, OTHER.
+  - **Estados de canal**:
+    - `emailStatus`: DELIVERABLE, BOUNCE, UNKNOWN.
+    - `whatsappStatus`: NOT_VALIDATED, VALIDATED, BLOCKED, UNKNOWN.
+  - **Opt-out por canal**:
+    - `optedOutEmail` / `optedOutEmailAt`: Opt-out específico para email.
+    - `optedOutWhatsapp` / `optedOutWhatsappAt`: Opt-out específico para WhatsApp.
+    - `hasOptedOut`: Campo legacy para compatibilidad (deprecated).
+  - Soporta contacto primario (`isPrimary`) y contacto de facturación (`isBillingContact`).
   - **Campos extendidos (Phase 2)**:
-    - `language`: Idioma preferido para comunicaciones.
-    - `timezone`: Zona horaria del contacto.
+    - `language`: Idioma preferido para comunicaciones (ISO 639-1).
+    - `timezone`: Zona horaria del contacto (IANA timezone).
     - `workingHoursWindow`: Ventana horaria preferida (JSON: {start, end, days}).
-    - `hasOptedOut`: Indicador de opt-out para no contactar (default: false).
     - `consentDate`: Fecha de consentimiento para comunicaciones.
+  - **Validaciones**:
+    - Al menos un canal requerido (email, teléfono o WhatsApp).
+    - Email en formato RFC 5322.
+    - Teléfono/WhatsApp en formato E.164 (+[country code][number]).
+    - Unicidad: email o WhatsApp único por empresa dentro de la organización (índices únicos parciales).
 
 #### Facturación y pagos
 - **Invoice**: Facturas emitidas a empresas clientes.
   - Estados: `DRAFT`, `PENDING`, `PARTIALLY_PAID`, `PAID`, `OVERDUE`, `CANCELLED`.
   - Campos: número, descripción, fechas (emisión/vencimiento), monto, moneda, notas, metadata.
-  - **Campos extendidos (Phase 2)**:
+  - **Campos extendidos (implementados)**:
     - `expectedPaymentDate`: Fecha esperada de pago (nullable).
     - `dateOrigin`: Origen de la fecha esperada (`DateOrigin` enum: `LOADED`, `REQUESTED_BY_AGENT`, `CONFIRMED_BY_CLIENT`).
     - `paymentPromiseDate`: Fecha de promesa de pago del cliente.
-    - `nextActionAt`: Próxima acción programada para esta factura.
+    - `nextActionAt`: Próxima acción programada para esta factura (calculada automáticamente).
     - `lastChannel`: Último canal de comunicación usado (`CommunicationChannel`).
     - `lastResult`: Resultado de la última comunicación (texto libre).
+  - **Unicidad**: Número de factura único por organización (`@@unique([organizationId, number])`).
+  - **Índices**: Optimizados para consultas por estado, fechas de vencimiento, fecha esperada y próxima acción.
 - **InvoiceDateHistory**: Historial de cambios de fechas esperadas de pago (auditoría).
   - Campos: invoiceId, previousDate, newDate, reason, changedBy, createdAt.
   - Permite rastrear todos los cambios de `expectedPaymentDate` con su origen y razón.
+  - Se registra automáticamente al actualizar `expectedPaymentDate` vía API.
 - **Installment**: Cuotas de pago asociadas a una factura.
   - Estados: `PENDING`, `PAID`, `OVERDUE`, `CANCELLED`.
   - Campos: secuencia, fecha de vencimiento, monto, monto pagado, fecha de pago.
@@ -381,7 +410,43 @@ Las enumeraciones reflejan el workflow de cobranzas y del agente:
 
 ## 7. Módulos funcionales principales
 
-### 7.1. Autenticación y multi-tenant
+### 7.1. Módulo de Facturas (Cartera)
+
+**Rutas principales**:
+- `/portfolio/invoices` - Lista de facturas con filtros y búsqueda
+- `/portfolio/invoices/new` - Crear nueva factura
+- `/portfolio/invoices/[id]` - Ficha 360° de factura (drawer)
+
+**Funcionalidades implementadas**:
+- Lista con columnas extendidas (empresa, número, monto, fechas, estado, días de mora, próxima acción, último canal)
+- Filtros rápidos (chips): Sin fecha, Con fecha, Vencen hoy, Vencidas, Con promesa hoy, Promesa incumplida, Pagadas
+- Búsqueda por número de factura o nombre de empresa
+- Selección múltiple y bulk actions (editar fecha esperada, marcar como pagadas)
+- Edición inline de fecha esperada de pago con popover
+- Formulario completo para crear/editar facturas
+- Ficha 360° (drawer) con tabs: Datos, Timeline, Historial
+- Diálogos para marcar como pagada y cancelar factura
+- Exportación CSV con filtros aplicados
+- Validaciones: montos, monedas ISO 4217, fechas, transiciones de estado
+- Cálculos derivados: días de mora, próxima acción, estado de seguimiento
+- RBAC: permisos diferenciados por rol (Admin puede editar montos, Operador puede editar fechas/estados)
+- Telemetría: eventos de Sentry para todas las acciones principales
+
+**API Routes**:
+- `GET /api/portfolio/invoices` - Listar facturas con filtros
+- `POST /api/portfolio/invoices` - Crear factura
+- `GET /api/portfolio/invoices/[id]` - Obtener factura
+- `PATCH /api/portfolio/invoices/[id]` - Actualizar factura
+- `PATCH /api/portfolio/invoices/[id]/expected-date` - Actualizar fecha esperada
+- `POST /api/portfolio/invoices/[id]/promise` - Registrar promesa de pago
+- `POST /api/portfolio/invoices/[id]/mark-paid` - Marcar como pagada
+- `POST /api/portfolio/invoices/[id]/cancel` - Cancelar factura
+- `PATCH /api/portfolio/invoices/bulk/expected-dates` - Bulk update fechas esperadas
+- `POST /api/portfolio/invoices/bulk/mark-paid` - Bulk mark as paid
+- `GET /api/portfolio/invoices/chips` - Obtener contadores para chips
+- `GET /api/portfolio/invoices/export` - Exportar CSV
+
+### 7.2. Autenticación y multi-tenant
 
 Objetivo:
 

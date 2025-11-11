@@ -1,20 +1,11 @@
 import { requireSession } from "@/lib/services/session";
 import { getServices } from "@/lib/services/get-services";
-import { InvoiceTable } from "@/components/invoices/invoice-table";
+import { InvoiceFilterChips } from "@/components/invoices/invoice-filter-chips";
+import { InvoiceSearch } from "@/components/invoices/invoice-search";
+import { InvoicesListClient } from "@/components/invoices/invoices-list-client";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Plus, Edit } from "lucide-react";
-import { EmptyState } from "@/components/shared/empty-state";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-
-// TODO: Replace with API call in Phase 3
-const mockFilterChips = [
-  { label: "Sin fecha", count: 12, active: false },
-  { label: "Vencen hoy", count: 5, active: false },
-  { label: "Vencidas", count: 23, active: true },
-  { label: "Con promesa", count: 3, active: false },
-];
+import { Plus } from "lucide-react";
 
 export default async function InvoicesPage() {
   const session = await requireSession({ redirectTo: "/" });
@@ -29,9 +20,12 @@ export default async function InvoicesPage() {
   };
 
   const { invoicesService } = getServices(context);
-  const result = await invoicesService.listInvoices(context, {
-    pagination: { limit: 50 },
-  });
+  const [result, chipCounts] = await Promise.all([
+    invoicesService.listInvoices(context, {
+      pagination: { limit: 50 },
+    }),
+    invoicesService.getChipCounts(context),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,61 +45,16 @@ export default async function InvoicesPage() {
       </div>
 
       {/* Filter Chips */}
-      <div className="flex flex-wrap items-center gap-2">
-        {mockFilterChips.map((chip) => (
-          <Button
-            key={chip.label}
-            variant={chip.active ? "default" : "outline"}
-            size="sm"
-            className="gap-2"
-          >
-            {chip.label}
-            <Badge variant="secondary" className="ml-1">
-              {chip.count}
-            </Badge>
-          </Button>
-        ))}
-      </div>
+      <InvoiceFilterChips initialCounts={chipCounts} />
 
       {/* Search */}
-      <div className="flex items-center gap-2">
-        <Input placeholder="Buscar facturas..." className="max-w-sm" />
-      </div>
+      <InvoiceSearch />
 
-      {/* Bulk Actions Toolbar - TODO: Implement selection state in Phase 3 */}
-      {false && (
-        <div className="flex items-center justify-between rounded-lg border bg-muted/50 p-2">
-          <span className="text-sm text-muted-foreground">
-            3 facturas seleccionadas
-          </span>
-          <Button variant="outline" size="sm" className="gap-2">
-            <Edit className="h-4 w-4" />
-            Editar fecha esperada
-          </Button>
-        </div>
-      )}
-
-      {result.data.length === 0 ? (
-        <EmptyState
-          title="No hay facturas"
-          description="Comienza agregando tu primera factura o importa desde CSV."
-          action={
-            <div className="flex gap-2">
-              <Button variant="outline" asChild>
-                <Link href="/settings/data">Importar CSV</Link>
-              </Button>
-              <Button asChild>
-                <Link href="/portfolio/invoices/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Agregar factura
-                </Link>
-              </Button>
-            </div>
-          }
-        />
-      ) : (
-        <InvoiceTable invoices={result.data} />
-      )}
+      {/* Invoices List */}
+      <InvoicesListClient
+        initialInvoices={result.data}
+        initialChipCounts={chipCounts}
+      />
     </div>
   );
 }

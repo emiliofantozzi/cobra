@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createCustomersService } from "./customers";
+import { createContactsService } from "./contacts";
 import { createInvoicesService } from "./invoices";
 import { createCollectionCasesService } from "./collection-cases";
 import { createCustomerCompanyRepository } from "../repositories/customer-company-repository";
@@ -28,6 +29,10 @@ export function getServices(context: RepositoryContext) {
     contactRepository,
   });
 
+  const contactsService = createContactsService({
+    contactRepository,
+  });
+
   const invoicesService = createInvoicesService({
     invoiceRepository,
     installmentRepository,
@@ -43,6 +48,7 @@ export function getServices(context: RepositoryContext) {
 
   return {
     customersService,
+    contactsService,
     invoicesService,
     collectionCasesService,
   };

@@ -1,10 +1,14 @@
 import { requireSession } from "@/lib/services/session";
 import { getServices } from "@/lib/services/get-services";
 import { notFound } from "next/navigation";
-import { CustomerOverview } from "@/components/customers/customer-overview";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContactsList } from "@/components/customers/contacts-list";
 import { InvoicesList } from "@/components/customers/invoices-list";
+import { CompanyDetailClient } from "@/components/portfolio/companies/company-detail-client";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+import type { MembershipRole } from "@prisma/client";
 
 type CustomerDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -25,7 +29,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
   };
 
   const { customersService, invoicesService } = getServices(context);
-  const customer = await customersService.getCustomerCompany(context, id as any);
+  const customer = await customersService.getCustomerCompanyWithRelations(context, id as any);
 
   if (!customer) {
     notFound();
@@ -44,11 +48,21 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{customer.name}</h1>
-        <p className="text-sm text-muted-foreground">
-          Vista 360º de la empresa cliente
-        </p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/portfolio/companies">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Volver
+            </Link>
+          </Button>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">{customer.name}</h1>
+            <p className="text-sm text-muted-foreground">
+              Vista 360º de la empresa cliente
+            </p>
+          </div>
+        </div>
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
@@ -59,7 +73,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="space-y-4">
-          <CustomerOverview customer={customer} />
+          <CompanyDetailClient company={customer} userRole={session.user.role as MembershipRole} />
         </TabsContent>
         <TabsContent value="contacts" className="space-y-4">
           <ContactsList contacts={contactsResult.data} customerId={customer.id} />
